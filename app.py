@@ -195,12 +195,18 @@ MODEL_NAME = "gemini-2.5-flash"
 MAX_AI_ATTEMPTS = 3
 
 
-def generate_with_retry(prompt):
-    """Call Gemini, retrying transient failures (e.g. 503 UNAVAILABLE) with backoff."""
+def generate_with_retry(prompt, json_mode=False):
+    """Call Gemini, retrying transient failures (e.g. 503 UNAVAILABLE) with backoff.
+
+    json_mode asks the API for strictly valid JSON, which avoids stray text or broken syntax.
+    """
     last_error = None
+    kwargs = {}
+    if json_mode:
+        kwargs["config"] = {"response_mime_type": "application/json"}
     for attempt in range(MAX_AI_ATTEMPTS):
         try:
-            return client.models.generate_content(model=MODEL_NAME, contents=prompt)
+            return client.models.generate_content(model=MODEL_NAME, contents=prompt, **kwargs)
         except Exception as e:  # noqa: BLE001 - SDK raises several error types
             last_error = e
             if attempt < MAX_AI_ATTEMPTS - 1:
@@ -328,11 +334,16 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
         "resume": "URL placeholder"
     }}
     """
-    try:
-        response = generate_with_retry(prompt)
-        return response.text, True
-    except Exception as e:
-        return str(e), False
+    # The model occasionally returns malformed JSON, so a bad answer gets one fresh attempt.
+    last_error = "No response"
+    for _ in range(2):
+        try:
+            response = generate_with_retry(prompt, json_mode=True)
+            parse_scoring_response(response.text)  # validate only; callers parse again
+            return response.text, True
+        except Exception as e:  # noqa: BLE001
+            last_error = str(e)
+    return last_error, False
 
 
 def parse_scoring_response(raw_text):
