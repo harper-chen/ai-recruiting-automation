@@ -209,6 +209,12 @@ def generate_with_retry(prompt, json_mode=False):
             return client.models.generate_content(model=MODEL_NAME, contents=prompt, **kwargs)
         except Exception as e:  # noqa: BLE001 - SDK raises several error types
             last_error = e
+            if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                # A quota limit will not clear within seconds, so retrying only wastes time.
+                raise RuntimeError(
+                    "The AI quota for this demo is used up (the free Gemini tier allows only a small number of "
+                    "requests per day). Please try again later."
+                ) from e
             if attempt < MAX_AI_ATTEMPTS - 1:
                 time.sleep(2 ** attempt)
     raise last_error
@@ -343,6 +349,8 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
             return response.text, True
         except Exception as e:  # noqa: BLE001
             last_error = str(e)
+            if "quota" in last_error:
+                break
     return last_error, False
 
 
