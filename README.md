@@ -2,7 +2,7 @@
 
 AI resume screening, hiring-manager review, candidate emails and self-service interview booking, with a recruiting analytics dashboard. Built with Python, Streamlit, Gemini and Google Sheets.
 
-**Live demo:** [HR Command Center](https://harper-hr-dashboard.streamlit.app/) · [Interview Booking](https://harper-interview-booking.streamlit.app/)
+**Live demo:** [HR Command Center](https://YOUR-HR-APP-NAME.streamlit.app/) · [Interview Booking](https://harper-interview-booking.streamlit.app/)
 
 > The demo apps sleep when idle. If you see a "gone to sleep" page, press the wake-up button and wait about 30 seconds.
 
@@ -19,7 +19,7 @@ Add screenshots here after uploading them to docs/images/, for example:
 - **Scores resumes with AI.** Upload a job description, let the AI draft scoring rules, then score a batch of PDF resumes against them. Every candidate starts at 70 points; the AI lists which rules applied and by how many points, and the code does the arithmetic.
 - **Lets you test the rules first.** A "Test these rules" dry run scores sample resumes without saving anything, and basic checks warn about rules with no point values or rules too lenient to ever reject anyone.
 - **Routes by score.** 60 or above goes to a hiring manager. Below 60 is queued for an automatic rejection email after 48 hours.
-- **Keeps a human in the loop.** Managers approve or decline shortlisted candidates, and can open the auto-rejected list, read the AI's full rationale and point-by-point arithmetic, and move anyone back to review before the rejection email goes out.
+- **Keeps a human in the loop.** Managers approve or decline shortlisted candidates, and can open the auto-rejected list, read the AI's rationale and point-by-point score arithmetic in the table, and move anyone back to review before the rejection email goes out.
 - **Sends the emails.** Interview invitations, rejection notes and booking confirmations are driven by a status column in Google Sheets.
 - **Books the interview.** Candidates pick from the interviewers' shared free time, a Google Meet room is created, and double booking is prevented.
 - **Shows where candidates drop out.** A dashboard covers the funnel, conversion by experience, rejection reasons, score vs. salary expectation and skill premium.
@@ -61,7 +61,7 @@ If a hired candidate declines or takes another offer, HR can set `Offer Declined
 
 1. Open the **HR Command Center**. A sample "Python Backend Engineer" job is already loaded.
 2. In **AI Resume Parsing**, open *Test these rules on the sample resumes* to dry-run the rules (nothing is saved), then upload the PDFs from `sample_resumes/` and press *Start AI evaluation*.
-3. In **Manager Review**, expand *Full AI rationale and scoring arithmetic*, approve a candidate, decline another with a comment, and open the auto-rejected list to move someone back.
+3. In **Manager Review**, click a cell in the *AI Rationale* or *Score arithmetic* column to read it in full, approve a candidate, decline another with a comment, and open the auto-rejected list to move someone back.
 4. In **Email Routing**, run the state machine. Emails are previewed on screen (never sent). Tick "skip the wait" to include the automatic rejections.
 5. Click the booking link in the invitation preview, choose a slot and confirm.
 6. In **Analytics Dashboard**, sync and explore the charts.

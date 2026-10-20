@@ -622,7 +622,7 @@ with tab1:
                 if table:
                     st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
                     for r in good:
-                        st.markdown(f"- **{r['data'].get('name', r['file'])}**: {r['data']['score_calculation']}")
+                        st.markdown(f"- **{r['data'].get('name', r['file'])}**: {r['data']['score_calculation']}".replace("$", "\\$"))
                 for r in results:
                     if not r["ok"]:
                         st.error(f"{r['file']}: {r['error']}")
@@ -722,7 +722,6 @@ with tab2:
                         st.rerun()
 
                 review_data = []
-                review_details = []
                 for idx, row in enumerate(all_rows[1:], start=2):
                     row = pad_row(row)
                     job_title_in_sheet = row[1].strip()
@@ -738,13 +737,11 @@ with tab2:
                                 "Name": row[2],
                                 "AI Score": int(row[4]) if row[4].isdigit() else 0,
                                 "AI Rationale": row[15],
+                                "Score arithmetic": row[17],
                                 "✅ Approve Interview": row[5].strip().upper() == "TRUE",
                                 "📝 Manager Comment": row[6],
                                 "Resume": clean_resume_url(row[16]),
                             }
-                        )
-                        review_details.append(
-                            {"name": row[2], "score": int(row[4]) if row[4].isdigit() else 0, "reason": row[15], "calc": row[17]}
                         )
 
                 if review_data:
@@ -757,17 +754,12 @@ with tab2:
                             "Resume": st.column_config.LinkColumn("Resume", display_text="Open resume"),
                             "✅ Approve Interview": st.column_config.CheckboxColumn("✅ Approve Interview", default=False),
                             "AI Rationale": st.column_config.TextColumn("AI Rationale (click to expand)", width="large"),
+                            "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="large"),
                         },
-                        disabled=["Job", "Name", "AI Score", "AI Rationale", "Resume"],
+                        disabled=["Job", "Name", "AI Score", "AI Rationale", "Score arithmetic", "Resume"],
                         hide_index=True,
                         use_container_width=True,
                     )
-
-                    with st.expander("📖 Full AI rationale and scoring arithmetic", expanded=True):
-                        for item in review_details:
-                            st.markdown(f"- **{item['name']}** (score {item['score']}): {item['reason']}")
-                            if item["calc"]:
-                                st.caption(f"Score arithmetic: {item['calc']}")
 
                     if st.button("💾 Save review decisions and sync to the cloud", type="primary"):
                         with st.spinner("Syncing the manager's decisions to Google Sheets..."):
@@ -831,22 +823,16 @@ with tab2:
                             key="rescue_editor",
                             column_config={
                                 "Sheet_Row": None,
-                                "Score arithmetic": None,
                                 "Resume": st.column_config.LinkColumn("Resume", display_text="Open resume"),
                                 "↩️ Move back to review": st.column_config.CheckboxColumn("↩️ Move back to review", default=False),
                                 "AI Rationale": st.column_config.TextColumn("AI Rationale (click to expand)", width="large"),
+                                "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="large"),
                                 "Hours left": st.column_config.NumberColumn("Hours until email", format="%.1f"),
                             },
                             disabled=["Job", "Name", "AI Score", "Hours left", "AI Rationale", "Resume", "Score arithmetic"],
                             hide_index=True,
                             use_container_width=True,
                         )
-                        st.markdown("**Full AI rationale**")
-                        for item in rescue_data:
-                            st.markdown(f"- **{item['Name']}** (score {item['AI Score']}): {item['AI Rationale']}")
-                            if item["Score arithmetic"]:
-                                st.caption(f"Score arithmetic: {item['Score arithmetic']}")
-
                         if st.button("↩️ Move selected candidates back to manager review", key="rescue_btn"):
                             chosen = redited.loc[redited["↩️ Move back to review"], "Sheet_Row"].tolist()
                             if not chosen:
@@ -1016,7 +1002,7 @@ with tab3:
                                         subject = f"[{COMPANY_NAME}] Update on your application for \"{job_title}\""
                                         body = (
                                             f"Dear {name},\n\n"
-                                            f"Thank you for your interest in the \"{job_title}\" position at {COMPANY_NAME}. "
+                                            f"Thank you for your interest in the \"{job_title}\" position at {COMPANY_NAME.rstrip('.')}. "
                                             "After an initial review, and given the large number of applicants, we found that your "
                                             "background is not a close enough match with the specific technical stack our team "
                                             "currently needs, so we are unable to move forward with an interview at this time. "
@@ -1035,7 +1021,7 @@ with tab3:
                                     subject = f"[Interview Invitation] {COMPANY_NAME} - \"{job_title}\" team interview"
                                     booking_url = f"{config.BOOKING_APP_URL}?{urlencode({'name': name, 'email': email})}"
                                     body = f"""Dear {name},<br><br>
-Thank you for applying for the "{job_title}" position at {COMPANY_NAME}. After a careful review of your background, the hiring manager would like to invite you to the next stage: an online interview!<br><br>
+Thank you for applying for the "{job_title}" position at {COMPANY_NAME.rstrip('.')}. After a careful review of your background, the hiring manager would like to invite you to the next stage: an online interview!<br><br>
 To fit around the technical managers' schedules, we built a self-service booking page. It shows all of their open time slots for the next three weeks, synced in real time.<br><br>
 👇 <b>Click the link below and choose one open slot to book your interview:</b><br>
 <a href="{booking_url}" style="font-size: 16px; font-weight: bold; color: #1a73e8;">Open the interview booking page</a><br><br>
@@ -1055,7 +1041,7 @@ Sincerely,<br>The {COMPANY_NAME} Recruiting Team
                                     subject = f"[{COMPANY_NAME}] Update on your application for \"{job_title}\""
                                     body = (
                                         f"Dear {name},\n\n"
-                                        f"Thank you for applying for the \"{job_title}\" position at {COMPANY_NAME}. "
+                                        f"Thank you for applying for the \"{job_title}\" position at {COMPANY_NAME.rstrip('.')}. "
                                         "Your résumé is strong; however, after review by the hiring manager, we felt your fit with "
                                         "our current technical stack or salary expectations is not quite aligned with this role, "
                                         "so we are unable to arrange an interview this time. Thank you again for applying, and we "
