@@ -143,6 +143,7 @@ def save_job_profiles(profiles_dict):
 
 
 # ==================== Core functions ====================
+BASELINE_SCORE = 70  # every candidate starts here; rules add or subtract
 MODEL_NAME = "gemini-2.5-flash"
 MAX_AI_ATTEMPTS = 3
 
@@ -169,6 +170,16 @@ def generate_rules_from_jd(jd_text):
     1. Never use Markdown bold (**) or italics (*).
     2. Start every line with a plain bullet character (•) followed by one space.
     3. Output the list directly, with no introduction or closing remarks.
+
+    [SCORING SCALE - the scoring model applies your rules on top of this]:
+    - Every candidate starts at a baseline of {BASELINE_SCORE} points. The final score is capped between 0 and 100.
+    - A final score below {SCORE_THRESHOLD} means automatic rejection; {SCORE_THRESHOLD} or above goes to a hiring manager.
+    - So a candidate missing one or two REQUIRED items from the JD must end up below {SCORE_THRESHOLD}. Calibrate the point values accordingly:
+      * missing a hard requirement the JD lists as required: 10 to 20 points each
+      * clearly above the JD's salary range: 10 to 15 points
+      * minor or soft gaps (e.g. no proof of English level): 2 to 5 points
+      * nice-to-have skills or distinctive experience: +3 to +8 points each
+    - State every point value explicitly as a number.
 
     [CONTENT REQUIREMENTS]:
     1. Include explicit point deductions for missing core requirements (specific tools, education, years of experience).
@@ -238,7 +249,7 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
     {rules_text}
 
     [STRICT SCORING LOGIC - VERY IMPORTANT]:
-    1. The baseline score is 70 (not 100).
+    1. The baseline score is {BASELINE_SCORE} (not 100). The final score must stay between 0 and 100.
     2. Check the resume against every deduction and bonus rule above and do the real arithmetic.
     3. If the candidate's [expected salary] is clearly above the JD budget or an unreasonable range, you must
        apply a deduction. Never give a perfect score in that case.
