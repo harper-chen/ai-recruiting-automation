@@ -1,0 +1,29 @@
+Company: Acme Technology Ltd. (fictional demo company)
+Job title: Python Backend Engineer
+Location: Xinyi District, Taipei (near City Hall MRT)
+Type: Full-time
+Salary: NT$60,000 - NT$90,000 per month (adjusted for experience)
+
+[About the company]
+We help traditional businesses move to high-performance technical architectures through data-driven and automated workflows. Current flagship projects include an automated recruiting decision system and an ERP integration. We are looking for teammates who care about clean code and sound data-structure design.
+
+[Responsibilities]
+API design and development: build fast, stable, scalable RESTful APIs with Python (Flask / FastAPI / Django).
+Database management: design and tune database schemas (MySQL / PostgreSQL) for efficient data access.
+Workflow automation: write scripts for data processing, file reading (e.g. PDF parsing) and cross-system data sync.
+Cloud integration: connect third-party service APIs (Google Cloud API, Gemini API, Slack, etc.).
+Teamwork: take part in an agile process and ship features with frontend engineers and product managers.
+
+[Requirements]
+Education: bachelor's degree or above in computer science, information management or statistics.
+Language: strong Python skills.
+Experience: 2+ years of software development work or internship experience.
+Database: fluent in SQL, with complex-query optimization and data-cleaning skills.
+Version control: Git experience with team collaboration (GitHub / GitLab).
+English: able to read English technical documentation (TOEIC 750+ or equivalent).
+
+[Nice to have]
+Big-data processing or data visualization tools (Tableau, Power BI).
+Deployment and operations experience on a cloud platform (AWS / GCP / Azure).
+Familiarity with unit testing and automated test frameworks.
+Experience writing technical documentation for large projects.

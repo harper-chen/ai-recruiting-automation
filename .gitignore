@@ -1,0 +1,27 @@
+# ---- Credentials and secrets: never commit ----
+creds.json
+credentials.json
+token.json
+.env
+.streamlit/
+
+# ---- Runtime data generated while the app runs ----
+calendar_output.json
+bookings.json
+job_profiles.json
+temp_*.pdf
+
+# ---- Python, editor and OS noise ----
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+env/
+venv/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
