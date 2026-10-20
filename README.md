@@ -2,7 +2,7 @@
 
 AI resume screening, hiring-manager review, candidate emails and self-service interview booking, with a recruiting analytics dashboard. Built with Python, Streamlit, Gemini and Google Sheets.
 
-**Live demo:** [HR Command Center](https://YOUR-HR-APP-NAME.streamlit.app/) · [Interview Booking](https://harper-interview-booking.streamlit.app/)
+**Live demo:** [HR Command Center](https://harper-hr-dashboard.streamlit.app/) · [Interview Booking](https://harper-interview-booking.streamlit.app/)
 
 > The demo apps sleep when idle. If you see a "gone to sleep" page, press the wake-up button and wait about 30 seconds.
 
