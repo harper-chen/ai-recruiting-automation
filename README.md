@@ -5,13 +5,33 @@ AI resume screening, hiring-manager review, candidate emails and self-service in
 **Live demo:** [HR Command Center](https://harper-hr-dashboard.streamlit.app/) · [Interview Booking](https://harper-interview-booking.streamlit.app/)
 
 > The demo apps sleep when idle. If you see a "gone to sleep" page, press the wake-up button and wait about 30 seconds.
+## Screenshots
 
-<!--
-Add screenshots here after uploading them to docs/images/, for example:
-![Manager review board](docs/images/manager-review.png)
-![Analytics dashboard](docs/images/dashboard.png)
--->
+**1. Score resumes against editable rules** (the code does the arithmetic)
 
+![Resume parsing](docs/images/01-resume-parsing.png)
+
+**2. Hiring manager review**, with the AI's reasoning and a rescue path for auto-rejected candidates
+
+![Manager review](docs/images/02-manager-review.png)
+
+**3. Email routing** driven by the status column
+
+![Email routing](docs/images/03-email-routing.png)
+
+![Email preview](docs/images/04-email-preview.png)
+
+**4. Candidate self-service interview booking**
+
+![Interview booking](docs/images/05-interview-booking.png)
+
+**5. Recruiting analytics**
+
+![Analytics dashboard](docs/images/06-analytics-dashboard.png)
+
+**6. AI-written insights**, built from numbers the app computes
+
+![AI hiring insights](docs/images/07-ai-insights.png)
 > Class project built with fictional data. "Acme Technology Ltd." is an invented company, and every sample resume in `sample_resumes/` describes an invented person.
 
 ## What it does
