@@ -11,9 +11,11 @@ Google Sheets is the single source of truth; every state change is written back 
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
+import threading
 import time
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -30,6 +32,7 @@ from google.oauth2.service_account import Credentials
 from plotly.subplots import make_subplots
 
 import config
+import demo_support
 from scoring import analyze_rules as _analyze_rules
 from scoring import parse_scoring_response as _parse_scoring_response
 from config import (
@@ -76,7 +79,9 @@ if config.DEMO_MODE:
     st.warning(
         "🧪 **Demo mode.** No real emails are sent, no calendar events are created, and your uploads are not "
         "stored in Drive. Emails are shown on screen instead. Saved job profiles live only in your browser session. "
-        "Candidate rows go to a shared demo sheet that all visitors can see."
+        "Candidates you upload are tagged with your private code (for example ariel.lin+k3f9@example.com), so other "
+        "visitors do not see them, and they are deleted after 24 hours. The Analytics tab also includes about 40 "
+        "fictional sample candidates."
     )
 
 try:
@@ -117,6 +122,69 @@ def init_ai_client():
 
 sheet = init_google_sheets()
 client = init_ai_client()
+
+
+def get_visitor_tag():
+    """Demo only: a short per-visitor code, kept in the URL (?v=...) so it survives a page refresh."""
+    tag = st.session_state.get("visitor_tag")
+    if tag:
+        return tag
+    try:
+        candidate = st.query_params.get("v")
+    except Exception:  # noqa: BLE001
+        candidate = None
+    tag = candidate if demo_support.is_valid_tag(candidate) else demo_support.new_visitor_tag()
+    st.session_state.visitor_tag = tag
+    try:
+        st.query_params["v"] = tag
+    except Exception:  # noqa: BLE001
+        pass
+    return tag
+
+
+if config.DEMO_MODE:
+    get_visitor_tag()
+
+
+@st.cache_resource
+def housekeeping_lock():
+    return threading.Lock()
+
+
+def demo_housekeeping(force_reset=False):
+    """Demo only: delete visitor rows older than 24 hours, and (re)load fresh sample candidates when needed."""
+    if sheet is None:
+        return
+    seed_statuses = {
+        "rejected": STATUS_REJECTED,
+        "invited_no_reply": STATUS_INVITED_NO_REPLY,
+        "scheduled": STATUS_SCHEDULED,
+        "hired": STATUS_HIRED,
+    }
+    with housekeeping_lock():
+        rows = sheet.get_all_values()
+        now = datetime.now()
+        to_delete, reseed = demo_support.plan_housekeeping(rows, now, force_reset=force_reset)
+        for first, last in demo_support.contiguous_ranges(to_delete):
+            sheet.delete_rows(first, last)
+        if reseed:
+            seed_rows = demo_support.build_seed_rows(now, seed_statuses, BASELINE_SCORE, SCORE_THRESHOLD)
+            sheet.append_rows(seed_rows, value_input_option="RAW")
+
+
+if config.DEMO_MODE and sheet is not None and not st.session_state.get("housekeeping_done"):
+    try:
+        demo_housekeeping()
+    except Exception as housekeeping_error:  # noqa: BLE001 - never block the app on cleanup
+        st.warning(f"Demo cleanup skipped: {housekeeping_error}")
+    st.session_state.housekeeping_done = True
+
+
+def visible_to_me(row):
+    """Demo only: a visitor sees just their own candidates (rows tagged with their code)."""
+    if not config.DEMO_MODE:
+        return True
+    return demo_support.belongs_to_visitor(row[3] if len(row) > 3 else "", st.session_state.get("visitor_tag"))
 
 # Session state
 if "custom_rules" not in st.session_state:
@@ -250,9 +318,16 @@ def generate_rules_from_jd(jd_text):
     [JOB DESCRIPTION (JD)]:
     {jd_text}
     """
+    cache = demo_ai_cache() if config.DEMO_MODE else None
+    cache_key = "rules:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]["raw"]
     try:
         response = generate_with_retry(prompt)
-        return response.text.strip().replace("**", "")
+        text = response.text.strip().replace("**", "")
+        if cache is not None:
+            cache[cache_key] = {"raw": text, "at": datetime.now()}
+        return text
     except Exception as e:
         return f"⚠️ Rule generation failed: {e}"
 
@@ -294,7 +369,7 @@ def upload_file_and_get_link(file_path, file_name):
         return UPLOAD_FAILED_URL
 
 
-def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
+def _score_resume_uncached(file_name, resume_text, jd_text, rules_text, target_job_title):
     current_now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     prompt = f"""
     You are an extremely strict HR hiring manager at a technology company. Using the [Job Description] and the
@@ -354,6 +429,39 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
     return last_error, False
 
 
+@st.cache_resource
+def demo_ai_cache():
+    """Demo only: shared by all visitors, so the same resume + rules is scored by the AI once."""
+    return {}
+
+
+DEMO_CACHE_HOURS = 24
+DEMO_CACHE_MAX_ENTRIES = 500
+TIME_STAMP = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+
+
+def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
+    """Score one resume. In demo mode an identical resume + JD + rules reuses the earlier AI answer, which keeps
+    the free-tier quota for visitors who change something and makes the sample results repeatable."""
+    if not config.DEMO_MODE:
+        return _score_resume_uncached(file_name, resume_text, jd_text, rules_text, target_job_title)
+
+    key = hashlib.sha256("\x1f".join([MODEL_NAME, resume_text, jd_text, rules_text, target_job_title]).encode("utf-8")).hexdigest()
+    cache = demo_ai_cache()
+    now = datetime.now()
+    hit = cache.get(key)
+    if hit and (now - hit["at"]) < timedelta(hours=DEMO_CACHE_HOURS):
+        # Keep the application time current: swap the stored timestamp for the present one
+        return TIME_STAMP.sub(now.strftime("%Y-%m-%d %H:%M"), hit["raw"]), True
+
+    raw, ok = _score_resume_uncached(file_name, resume_text, jd_text, rules_text, target_job_title)
+    if ok:
+        if len(cache) >= DEMO_CACHE_MAX_ENTRIES:
+            cache.pop(next(iter(cache)))
+        cache[key] = {"raw": raw, "at": now}
+    return raw, ok
+
+
 def parse_scoring_response(raw_text):
     """Score is computed by code (see scoring.py), using this app's baseline."""
     return _parse_scoring_response(raw_text, BASELINE_SCORE)
@@ -370,6 +478,9 @@ def write_to_google_sheet(data_dict, real_resume_url):
     try:
         target_job = data_dict.get("job_applied", "").strip()
         target_email = data_dict.get("email", "").strip()
+        if config.DEMO_MODE:
+            # Same sample resume, different visitors: the private code makes each visitor's row unique
+            target_email = demo_support.tag_email(target_email, st.session_state.get("visitor_tag"))
         candidate_name = data_dict.get("name", "")
         score = data_dict.get("score", 0)
 
@@ -441,6 +552,20 @@ def hours_until_rejection(applied_at_str):
 # ==================== Streamlit UI ====================
 
 st.title("👔 HRIS Recruiting Command Center")
+if config.DEMO_MODE:
+    with st.expander("🛠️ Demo tools"):
+        st.caption(
+            f"Your private code is **{st.session_state.get('visitor_tag')}**. Only candidates tagged with it appear in "
+            "Manager Review and Email Routing. Keep this page's URL (it contains the code) to come back to them."
+        )
+        confirm_reset = st.checkbox("I understand this deletes every candidate in the demo sheet, for all visitors", key="confirm_reset")
+        if st.button("♻️ Reset demo data", disabled=not confirm_reset):
+            try:
+                demo_housekeeping(force_reset=True)
+                st.session_state.df_dash = pd.DataFrame()
+                st.success("Demo data reset: all candidates were removed and the sample candidates reloaded.")
+            except Exception as reset_error:  # noqa: BLE001
+                st.error(f"Reset failed: {reset_error}")
 tab1, tab2, tab3, tab4 = st.tabs(
     ["📥 AI Resume Parsing", "👨‍💼 Manager Review", "📬 Email Routing", "📊 Analytics Dashboard"]
 )
@@ -704,7 +829,7 @@ with tab2:
         all_rows = sheet.get_all_values()
         if len(all_rows) > 1:
             all_job_titles = sorted(
-                {row[1].strip() for row in all_rows[1:] if len(row) > 1 and row[1].strip() != ""}
+                {row[1].strip() for row in all_rows[1:] if len(row) > 1 and row[1].strip() != "" and visible_to_me(row)}
             )
 
             if not all_job_titles:
@@ -724,6 +849,8 @@ with tab2:
                 review_data = []
                 for idx, row in enumerate(all_rows[1:], start=2):
                     row = pad_row(row)
+                    if not visible_to_me(row):
+                        continue
                     job_title_in_sheet = row[1].strip()
 
                     is_status_match = row[0].strip() == STATUS_PENDING_REVIEW
@@ -790,6 +917,8 @@ with tab2:
                 rescue_data = []
                 for idx, row in enumerate(all_rows[1:], start=2):
                     row = pad_row(row)
+                    if not visible_to_me(row):
+                        continue
                     if row[0].strip() != STATUS_PENDING_REJECTION:
                         continue
                     if selected_job_tab2 != ALL_JOBS and row[1].strip() != selected_job_tab2:
@@ -877,7 +1006,7 @@ with tab3:
 
         if len(all_rows) > 1:
             all_job_titles_tab3 = sorted(
-                {row[1].strip() for row in all_rows[1:] if len(row) > 1 and row[1].strip() != ""}
+                {row[1].strip() for row in all_rows[1:] if len(row) > 1 and row[1].strip() != "" and visible_to_me(row)}
             )
 
             col_filter3, col_empty = st.columns([3, 1])
@@ -893,6 +1022,8 @@ with tab3:
 
             for row in all_rows[1:]:
                 row = pad_row(row)
+                if not visible_to_me(row):
+                    continue
                 status = row[0].strip()
                 job_title = row[1].strip()
                 name = row[2].strip()
@@ -973,6 +1104,8 @@ with tab3:
 
                             for idx, row in enumerate(all_rows[1:], start=2):
                                 row = pad_row(row)
+                                if not visible_to_me(row):
+                                    continue
                                 status = row[0].strip()
                                 job_title = row[1].strip()
                                 name = row[2].strip()
@@ -1070,6 +1203,11 @@ Sincerely,<br>The {COMPANY_NAME} Recruiting Team
 # ---------------------------------------------------------
 with tab4:
     st.header("📊 Applicant Analytics and Hiring Decision Report")
+    if config.DEMO_MODE:
+        st.caption(
+            "Demo data: about 40 fictional sample candidates plus the candidates visitors uploaded in the last 24 hours. "
+            "Unlike the review and routing tabs, this report is not limited to your own candidates."
+        )
 
     col_dash_load, col_dash_empty = st.columns([1, 3])
     with col_dash_load:

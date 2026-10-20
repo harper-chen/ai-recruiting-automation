@@ -66,6 +66,8 @@ Suggested demo: in the HR app's first tab, load `sample_jd/python_backend_engine
 
 Add `DEMO_MODE = true` to the secrets of any publicly shared deployment. Calendars are simulated, emails are previewed instead of sent, and Drive uploads are skipped, so strangers cannot use your Gmail, calendar or Drive. You then only need `GEMINI_API_KEY`, `BOOKING_APP_URL` and `gcp_service_account` (pointing at a throwaway demo sheet). Put a spending cap on the Gemini key.
 
+In demo mode the app looks after the sheet by itself: it loads about 40 fictional sample candidates (emails ending in `@seed.example.com`), refreshes them when they get older than a week, and deletes visitors' rows after 24 hours. Visitors' candidates get a private code in their email address (`name+code@domain`) so they only see their own. The *Demo tools* panel has a reset button. The service account therefore needs Editor access to the sheet, and the sheet should contain nothing you want to keep. A free-tier Gemini key allows only about 20 requests per day, so identical resume + rules combinations are cached across visitors.
+
 ## 8. Deploy to Streamlit Community Cloud
 
 1. Push the repo to GitHub.

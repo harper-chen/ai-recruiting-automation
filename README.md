@@ -66,7 +66,7 @@ If a hired candidate declines or takes another offer, HR can set `Offer Declined
 5. Click the booking link in the invitation preview, choose a slot and confirm.
 6. In **Analytics Dashboard**, sync and explore the charts.
 
-In demo mode no email is sent, no calendar event is created, and uploaded files are not stored. Saved job profiles live only in your own browser session. Candidate rows go to a shared demo sheet that all visitors can see.
+In demo mode no email is sent, no calendar event is created, and uploaded files are not stored. Saved job profiles live only in your own browser session. Candidates you upload are tagged with a private code (for example `ariel.lin+k3f9@example.com`, kept in the page URL), so many visitors can score the same sample resumes at the same time and each sees only their own in Manager Review and Email Routing. Visitor rows are deleted after 24 hours. The Analytics tab also shows about 40 fictional sample candidates, and a *Demo tools* panel can reset everything. Identical resume + rules combinations reuse the earlier AI answer, which keeps the free Gemini quota for visitors who change something.
 
 ## Run it yourself
 
@@ -87,12 +87,13 @@ This is a class project, not a production hiring system.
 - **AI scoring is a screening aid, not a decision.** Scores come from a language model reading resumes and have not been validated for accuracy or tested for bias. Managers can review and rescue auto-rejected candidates, but only until the rejection email is sent; a production system should add a mandatory human review and be audited for adverse impact.
 - **Scores are not perfectly repeatable.** Scoring the same resume twice can differ by a few points, so candidates near the threshold may land on either side of it.
 - **Rule quality matters.** The AI drafts the scoring rules, but a recruiter must read and tune them. Strict rules (such as requiring specific degree majors) can screen out capable candidates.
+- **The public demo is shared infrastructure.** All visitors use one Google Sheet and one free-tier Gemini key (a small daily request limit), so the demo can show a "quota used up" message at busy times. Its analytics include other visitors' recent uploads.
 - **Retries are minimal.** AI calls retry up to three times with backoff on errors such as `503 UNAVAILABLE`; there is no queueing or rate limiting.
 - **Concurrency.** Google Sheets is the database and `bookings.json` is a local file, so two simultaneous bookings can race. Slot protection is best-effort, and the file is lost when a free cloud host restarts.
 - **Positional columns.** Reading the sheet by column index is brittle if columns are reordered.
 - **The rejection-reason chart uses keyword matching** on the AI's free-text rationale. Treat it as indicative.
 - **Fixed schedule and timezone.** Business hours, 1-hour interviews and Taipei time (GMT+8) are constants in the code.
-- **Light test coverage.** Unit tests cover the scoring arithmetic and rule checks (`python -m unittest`); the Streamlit UI, Sheets, Calendar and email paths are tested by hand only.
+- **Light test coverage.** Unit tests cover the scoring arithmetic, rule checks and demo helpers (`python -m unittest`); the Streamlit UI, Sheets, Calendar and email paths are tested by hand only.
 
 ## Team
 
@@ -127,8 +128,9 @@ The `status` values are defined in `config.py` and must match the sheet exactly 
 .
 ├── app.py                      # HR Command Center (4 tabs)
 ├── streamlit_app.py            # Candidate interview booking page
+├── demo_support.py             # Demo-only helpers: visitor tags, sample candidates, cleanup plan
 ├── scoring.py                  # Pure score arithmetic + rule checks (unit tested)
-├── tests/test_scoring.py       # Unit tests
+├── tests/                      # Unit tests for scoring.py and demo_support.py
 ├── config.py                   # Settings, scoring scale and the status-machine constants
 ├── calendar_busytime.py        # Reads interviewers' busy blocks (or simulates them in demo mode)
 ├── calendar_sync.py            # Creates the Calendar event + Google Meet link
