@@ -331,7 +331,7 @@ else:
                                         subject = f"[Interview Confirmed] {COMPANY_NAME} - technical interview booked"
                                         body = f"""Dear {applicant_name},
 
-You have successfully booked a technical interview with {COMPANY_NAME}. Your interview details are below. Please arrive on time.
+You have successfully booked a technical interview with {COMPANY_NAME.rstrip('.')}. Your interview details are below. Please arrive on time.
 
 📅 Date: {date_str}
 ⏰ Time: {start_time} - {end_time} ({config.TIMEZONE_NAME}, GMT+{config.TIMEZONE_OFFSET_HOURS})
