@@ -366,13 +366,51 @@ def generate_insights_report(summary):
     if cache is not None and cache_key in cache:
         return cache[cache_key]["raw"]
     try:
-        response = generate_with_retry(prompt)
+        response = generate_with_retry(prompt, json_mode=True)
         text = response.text.strip()
+        if insights.parse_report(text) is None:
+            return "⚠️ The AI answer could not be read as a report. Please press the button again."
         if cache is not None:
             cache[cache_key] = {"raw": text, "at": datetime.now()}
         return text
     except Exception as e:
         return f"⚠️ Could not generate the report: {e}"
+
+
+def show_insights_report(report):
+    """Render the report as cards. The metrics come from code; the wording comes from the AI."""
+    esc = lambda text: str(text).replace("$", "\\$")  # noqa: E731 - keep NT$ amounts from rendering as math
+    data = insights.parse_report(report["text"])
+    if data is None:
+        st.warning(esc(report["text"]))
+        return
+    stats = report["summary"]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Applicants", stats["applicants"])
+    m2.metric("Reached interview", f"{stats['interview_rate_pct']:g}%", f"{stats['reached_interview_stage']} people", delta_color="off")
+    m3.metric("Hired", stats["hired"], f"{stats['hire_rate_pct']:g}% of applicants", delta_color="off")
+    m4.metric("Median score", stats["score_median"] if stats["score_median"] is not None else "-")
+
+    if data["summary"]:
+        st.info(f"📌 **Summary**  \n{esc(data['summary'])}")
+
+    if data["findings"]:
+        st.markdown("#### 🔍 Key findings")
+        for column, finding in zip(st.columns(len(data["findings"])), data["findings"]):
+            with column:
+                with st.container(border=True):
+                    st.markdown(f"**{esc(finding['title'])}**")
+                    st.write(esc(finding["detail"]))
+
+    if data["recommendations"]:
+        st.markdown("#### 💡 Recommendations")
+        for number, rec in enumerate(data["recommendations"], start=1):
+            with st.container(border=True):
+                st.markdown(f"**{number}. {esc(rec['title'])}**")
+                st.write(esc(rec["detail"]))
+
+    if data["caveat"]:
+        st.caption(f"⚠️ {esc(data['caveat'])}")
 
 
 UPLOAD_FAILED_URL = "https://drive.google.com/resume/upload_failed"
@@ -1498,9 +1536,11 @@ with tab4:
                 report = st.session_state.get("analytics_report")
                 if report:
                     st.caption(f"Report for {report['scope']}")
-                    st.markdown(report["text"].replace("$", "\\$"))
-                    with st.expander("🔢 The numbers the AI was given"):
-                        st.json(report["summary"])
+                    show_insights_report(report)
+                    with st.expander("📎 Data behind this report (calculated by the app, given to the AI)"):
+                        for table_title, table in insights.summary_tables(report["summary"]):
+                            st.markdown(f"**{table_title}**")
+                            st.dataframe(table, hide_index=True, use_container_width=True)
 
             else:
                 st.warning("No applicants match the current filters.")

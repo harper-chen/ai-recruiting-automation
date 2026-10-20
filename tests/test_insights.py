@@ -52,6 +52,24 @@ class Categorize(unittest.TestCase):
         self.assertEqual(insights.categorize_reason({"score_reason": "Salary within budget."}), "AI: other mismatch")
 
 
+class ParseReport(unittest.TestCase):
+    GOOD = (
+        '```json\n{"summary": "S", "findings": [{"title": "T1", "detail": "D1"}, "junk", {"detail": "D2"}],'
+        ' "recommendations": [{"title": "R1", "detail": "RD1"}], "caveat": "C"}\n```'
+    )
+
+    def test_parses_fenced_json_and_skips_junk(self):
+        report = insights.parse_report(self.GOOD)
+        self.assertEqual(report["summary"], "S")
+        self.assertEqual([f["detail"] for f in report["findings"]], ["D1", "D2"])
+        self.assertEqual(report["recommendations"][0]["title"], "R1")
+        self.assertEqual(report["caveat"], "C")
+
+    def test_unusable_text_returns_none(self):
+        for bad in ("not json", "", None, "{broken", '{"foo": 1}', "[1, 2]"):
+            self.assertIsNone(insights.parse_report(bad))
+
+
 class Summary(unittest.TestCase):
     def setUp(self):
         self.df = seed_frame()
@@ -97,6 +115,17 @@ class Summary(unittest.TestCase):
         self.assertIn("ONLY the numbers", prompt)
         self.assertIn("fictional demo candidates", prompt)
         self.assertNotIn("fictional demo candidates", insights.build_prompt({**self.summary, "is_demo_sample_data": False}))
+
+    def test_prompt_forbids_unsupported_benchmarks(self):
+        self.assertIn("no benchmark is provided", insights.build_prompt(self.summary))
+
+    def test_summary_tables_are_readable_frames(self):
+        tables = insights.summary_tables(self.summary)
+        titles = [title for title, _ in tables]
+        self.assertIn("Conversion by experience", titles)
+        self.assertIn("Most triggered deductions", titles)
+        for _, frame in tables:
+            self.assertFalse(frame.empty)
 
     def test_empty_and_missing_columns_do_not_crash(self):
         empty = pd.DataFrame(columns=COLUMNS)

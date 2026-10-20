@@ -163,7 +163,7 @@ def build_prompt(summary):
     """Instructions plus the facts. The model must explain these numbers, not add its own."""
     facts = json.dumps(summary, indent=1, ensure_ascii=False)
     demo_line = (
-        "These are fictional demo candidates; say once, briefly, that the findings describe sample data.\n"
+        "- These are fictional demo candidates; mention that once, briefly, in the summary.\n"
         if summary.get("is_demo_sample_data")
         else ""
     )
@@ -173,18 +173,73 @@ funnel. Write a short report using ONLY the numbers in [FACTS]. Never invent or 
 [FACTS]:
 {facts}
 
-[FORMAT - plain text, no tables]:
-Summary: 2-3 sentences on how the funnel is performing (interview rate, hire rate).
-Key findings: exactly 3 bullets starting with "- ". Each cites at least one number from the facts. Look for where
-candidates drop out, whether a salary expectation or a requirement looks out of line with the market the data
-suggests, and any scoring rule that fires for a very large or very small share of applicants.
-Recommendations: 2-3 bullets starting with "- ", each a concrete action a recruiter could take (for example adjust
-a salary range, split or relax a requirement, change where candidates are sourced).
-Caveats: one sentence about sample size and about correlation not being causation.
+Reply with this JSON only (plain text values: no Markdown, no emoji, no preamble):
+{{
+  "summary": "2 sentences on how the funnel is performing (interview rate, hire rate)",
+  "findings": [{{"title": "short title, max 8 words", "detail": "1-2 sentences that cite numbers from the facts"}}],
+  "recommendations": [{{"title": "short action, max 8 words", "detail": "1-2 sentences on what a recruiter could do and why"}}],
+  "caveat": "one sentence about sample size and correlation not being causation"
+}}
 
 [RULES]:
-- Total length under 250 words.
+- Exactly 3 findings and 2 or 3 recommendations. Each detail is at most 35 words.
+- Findings should cover where candidates drop out, whether a salary expectation or a requirement looks out of line
+  with what the data shows, and any scoring rule that fires for a very large or very small share of applicants.
+- Do not compare with other companies, industries or "typical" rates: no benchmark is provided, so never call a
+  rate high or low in absolute terms. Compare only groups inside the facts (for example one experience band with another).
 - Use cautious wording ("may", "worth checking"); do not claim causes.
 - Talk about the process and the job requirements, never about individual people or protected characteristics.
 - Salaries are monthly, in TWD.
 {demo_line}"""
+
+
+def parse_report(raw_text):
+    """Turn the model's JSON into a clean dict, or None when it is unusable (the caller then shows the raw text)."""
+    match = re.search(r"\{[\s\S]*\}", str(raw_text or ""))
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    def items(key):
+        out = []
+        for entry in data.get(key) or []:
+            if isinstance(entry, dict) and (entry.get("title") or entry.get("detail")):
+                out.append({"title": str(entry.get("title", "")).strip(), "detail": str(entry.get("detail", "")).strip()})
+        return out
+
+    report = {
+        "summary": str(data.get("summary", "")).strip(),
+        "findings": items("findings"),
+        "recommendations": items("recommendations"),
+        "caveat": str(data.get("caveat", "")).strip(),
+    }
+    if not report["summary"] and not report["findings"]:
+        return None
+    return report
+
+
+def summary_tables(summary):
+    """The same numbers the AI saw, as small readable tables: [(title, DataFrame), ...]."""
+    tables = []
+    if summary.get("by_experience"):
+        df = pd.DataFrame(summary["by_experience"]).T.reset_index()
+        df.columns = ["Experience", "Applicants", "Interview rate (%)", "Median expected salary (TWD)"]
+        tables.append(("Conversion by experience", df))
+    if summary.get("why_candidates_dropped_out"):
+        df = pd.DataFrame(list(summary["why_candidates_dropped_out"].items()), columns=["Reason", "Candidates"])
+        tables.append(("Why candidates dropped out", df))
+    for key, title in (("most_triggered_deductions", "Most triggered deductions"), ("most_triggered_bonuses", "Most triggered bonuses")):
+        if summary.get(key):
+            df = pd.DataFrame(summary[key])
+            df.columns = ["Rule", "Points", "Candidates", "Share of applicants (%)", "Interview rate among them (%)"]
+            tables.append((title, df))
+    if summary.get("common_skills"):
+        df = pd.DataFrame(summary["common_skills"])
+        df.columns = ["Skill", "Candidates", "Median expected salary (TWD)"]
+        tables.append(("Common skills", df))
+    return tables
