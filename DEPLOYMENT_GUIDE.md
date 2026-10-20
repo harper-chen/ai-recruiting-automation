@@ -11,7 +11,7 @@ pip install -r requirements.txt
 ## 1. Create the Google Sheet
 
 1. Create a spreadsheet named **HR Applicant Tracker** (or set `SHEET_NAME` in secrets).
-2. Paste the 17 header names from the "Google Sheet contract" table in the README into row 1 of the first tab, in order.
+2. Paste the 18 header names (the last is `score_calculation`) from the "Google Sheet contract" table in the README into row 1 of the first tab, in order.
 3. On column A, add a data-validation dropdown containing the status values listed in the README.
 
 ## 2. Service account (Sheets access)

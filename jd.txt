@@ -2,7 +2,7 @@ Company: Acme Technology Ltd. (fictional demo company)
 Job title: Python Backend Engineer
 Location: Xinyi District, Taipei (near City Hall MRT)
 Type: Full-time
-Salary: NT$60,000 - NT$90,000 per month (adjusted for experience)
+Salary: NT$60,000 - NT$70,000 per month (adjusted for experience)
 
 [About the company]
 We help traditional businesses move to high-performance technical architectures through data-driven and automated workflows. Current flagship projects include an automated recruiting decision system and an ERP integration. We are looking for teammates who care about clean code and sound data-structure design.

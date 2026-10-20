@@ -1,0 +1,12 @@
+• Missing a bachelor's degree or higher in Computer Science, Information Management, or Statistics: -15 points.
+• Less than 2 years of software development work or internship experience: -15 points.
+• Python skills not demonstrated as strong (for example only basic or beginner level): -15 points.
+• No demonstrated experience with a Python web framework (Flask, FastAPI, or Django): -10 points.
+• No proven SQL fluency (complex-query optimization, data cleaning) or no MySQL/PostgreSQL experience: -15 points.
+• No Git experience with team collaboration (GitHub / GitLab): -10 points.
+• Expected salary explicitly stated above NT$70,000 per month: -10 points.
+• No clear indication of ability to read English technical documentation (for example TOEIC 750+ or equivalent): -5 points.
+• Demonstrated experience with big-data processing or data visualization tools (Tableau, Power BI): +5 points.
+• Deployment and operations experience on a cloud platform (AWS, GCP, Azure): +5 points.
+• Clear familiarity with unit testing and automated test frameworks: +3 points.
+• Email extraction: extract the real email address exactly as written; never alter the spelling.

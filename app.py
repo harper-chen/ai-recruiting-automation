@@ -30,6 +30,8 @@ from google.oauth2.service_account import Credentials
 from plotly.subplots import make_subplots
 
 import config
+from scoring import analyze_rules as _analyze_rules
+from scoring import parse_scoring_response as _parse_scoring_response
 from config import (
     COMPANY_NAME,
     INVITED_STATUSES,
@@ -72,8 +74,9 @@ st.markdown(
 
 if config.DEMO_MODE:
     st.warning(
-        "🧪 **Demo mode.** No real emails are sent, no calendar events are created, and resumes are not "
-        "stored in Drive. Emails are shown on screen instead. Data lives in a shared demo sheet that anyone can edit."
+        "🧪 **Demo mode.** No real emails are sent, no calendar events are created, and your uploads are not "
+        "stored in Drive. Emails are shown on screen instead. Saved job profiles live only in your browser session. "
+        "Candidate rows go to a shared demo sheet that all visitors can see."
     )
 
 try:
@@ -128,9 +131,35 @@ NEW_JOB = "➕ Add a new job manually"
 
 # ==================== Job profile storage ====================
 PROFILE_FILE = "job_profiles.json"
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+SAMPLE_PROFILE_NAME = "Python Backend Engineer"
+
+
+def _read_text(relative_path):
+    try:
+        with open(os.path.join(APP_DIR, relative_path), "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def sample_profiles():
+    """Ready-made job profile so demo visitors can start scoring in two clicks."""
+    return {
+        SAMPLE_PROFILE_NAME: {
+            "jd": _read_text("jd.txt"),
+            "rules": _read_text("sample_jd/python_backend_engineer_rules.txt"),
+        }
+    }
 
 
 def load_job_profiles():
+    """Demo mode: profiles live in this visitor's session only (nothing is shared or persisted).
+    Normal mode: profiles are stored in a local JSON file."""
+    if config.DEMO_MODE:
+        if "job_profiles" not in st.session_state:
+            st.session_state.job_profiles = sample_profiles()
+        return st.session_state.job_profiles
     if os.path.exists(PROFILE_FILE):
         try:
             with open(PROFILE_FILE, "r", encoding="utf-8") as f:
@@ -141,8 +170,24 @@ def load_job_profiles():
 
 
 def save_job_profiles(profiles_dict):
+    if config.DEMO_MODE:
+        st.session_state.job_profiles = profiles_dict
+        return
     with open(PROFILE_FILE, "w", encoding="utf-8") as f:
         json.dump(profiles_dict, f, ensure_ascii=False, indent=4)
+
+
+def delete_selected_profile():
+    """Button callback: remove the profile chosen in the dropdown and reset the form."""
+    selected = st.session_state.get("profile_selector")
+    profiles = load_job_profiles()
+    if selected in profiles:
+        del profiles[selected]
+        save_job_profiles(profiles)
+    st.session_state.profile_selector = NEW_JOB
+    st.session_state.current_job_title = ""
+    st.session_state.current_jd = ""
+    st.session_state.custom_rules = ""
 
 
 # ==================== Core functions ====================
@@ -187,7 +232,8 @@ def generate_rules_from_jd(jd_text):
     1. Include explicit point deductions for missing core requirements (specific tools, education, years of experience).
     2. Include explicit point bonuses for advanced skills or distinctive experience.
     3. If the JD states a salary range, add a deduction rule for expected salaries above it.
-    4. Keep this system rule as the final line: "• Email extraction: extract the real email address exactly as written; never alter the spelling."
+    4. Each rule must test exactly ONE condition. Never join conditions with AND / OR inside a rule; split them into separate rules.
+    5. Keep this system rule as the final line: "• Email extraction: extract the real email address exactly as written; never alter the spelling."
 
     [JOB DESCRIPTION (JD)]:
     {jd_text}
@@ -209,7 +255,11 @@ def upload_file_and_get_link(file_path, file_name):
     through a script that runs as a normal Google user and returns a shareable link.
     """
     if config.DEMO_MODE:
-        return "(not stored in demo mode)"
+        # Never store strangers' uploads. The bundled sample resumes link to their copy on GitHub instead.
+        sample_dir = os.path.join(APP_DIR, "sample_resumes")
+        if os.path.isdir(sample_dir) and file_name in os.listdir(sample_dir):
+            return f"{config.REPO_URL}/blob/main/sample_resumes/{file_name}"
+        return ""
 
     if not config.APPS_SCRIPT_URL:
         st.warning("APPS_SCRIPT_URL is not configured, so the resume file will not be stored in Drive.")
@@ -251,21 +301,21 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
     {rules_text}
 
     [STRICT SCORING LOGIC - VERY IMPORTANT]:
-    1. The baseline score is {BASELINE_SCORE} (not 100). The final score must stay between 0 and 100.
-    2. Check the resume against every deduction and bonus rule above and do the real arithmetic.
-    3. If the candidate's [expected salary] is clearly above the JD budget or an unreasonable range, you must
-       apply a deduction. Never give a perfect score in that case.
-    4. In the "score_calculation" field, write out the explicit add/subtract arithmetic first, and only then give
-       the final "score" (maximum 100).
+    1. Do NOT compute a final score. The system starts from a baseline of {BASELINE_SCORE} and adds up your
+       adjustments itself.
+    2. Check the resume against every deduction and bonus rule above. For each rule that APPLIES to this
+       candidate, add one entry to "adjustments" with a short description of the rule and the signed points
+       exactly as written in that rule (for example -15 or 5). Leave out rules that do not apply.
+    3. Only use point values that appear in the rules. Never invent adjustments, and never apply one rule twice.
+    4. If the candidate's [expected salary] is clearly above the JD budget and no rule covers it, add one
+       adjustment "Salary above budget" worth -{RULE_GUIDE['salary_over'][0]}.
 
     Reply with the following JSON only, with no Markdown tags:
     {{
-        "status": "decided by score: below {SCORE_THRESHOLD} use '{STATUS_PENDING_REJECTION}', {SCORE_THRESHOLD} or above use '{STATUS_PENDING_REVIEW}'",
         "job_applied": "{target_job_title}",
         "name": "candidate's full name",
         "email": "email address extracted from the resume",
-        "score_calculation": "the arithmetic, e.g. baseline 70 + Python proficiency 10 - salary over budget 15 = 65",
-        "score": numeric score,
+        "adjustments": [{{"rule": "short description of a rule that applied", "points": -15}}],
         "applied_at": "{current_now_str}",
         "action_at": "{current_now_str}",
         "interview_at": "",
@@ -283,6 +333,16 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
         return response.text, True
     except Exception as e:
         return str(e), False
+
+
+def parse_scoring_response(raw_text):
+    """Score is computed by code (see scoring.py), using this app's baseline."""
+    return _parse_scoring_response(raw_text, BASELINE_SCORE)
+
+
+def analyze_rules(rules_text):
+    """Sanity checks on the free-text rules (see scoring.py), using this app's baseline and threshold."""
+    return _analyze_rules(rules_text, BASELINE_SCORE, SCORE_THRESHOLD)
 
 
 def write_to_google_sheet(data_dict, real_resume_url):
@@ -317,10 +377,11 @@ def write_to_google_sheet(data_dict, real_resume_url):
             data_dict.get("skills_extracted", ""),
             data_dict.get("score_reason", ""),
             real_resume_url,
+            data_dict.get("score_calculation", ""),
         ]
 
         sheet.update(f"A{next_row}:E{next_row}", [front_part])
-        sheet.update(f"H{next_row}:Q{next_row}", [back_part])
+        sheet.update(f"H{next_row}:R{next_row}", [back_part])
         return f"🚀 {candidate_name} written. Job: [{target_job}] / Status: [{final_status}]"
 
     except Exception as e:
@@ -331,14 +392,31 @@ class DemoMailer:
     """Stand-in for yagmail.SMTP in demo mode: previews the email instead of sending it."""
 
     def send(self, to, subject, contents):
-        with st.expander(f"📧 Demo preview (not sent) - {subject}"):
-            st.caption(f"To: {to}")
-            st.markdown(contents.replace("\n", "  \n"), unsafe_allow_html=True)
+        # Stored in session state so the preview survives the st.rerun() after dispatch
+        st.session_state.setdefault("demo_emails", []).append({"to": to, "subject": subject, "body": contents})
 
 
 def pad_row(row):
-    """Sheets drops trailing empty cells; pad to the 17 columns this app expects."""
-    return row + [""] * (17 - len(row))
+    """Sheets drops trailing empty cells; pad to the 18 columns this app expects."""
+    return row + [""] * (18 - len(row))
+
+
+def clean_resume_url(value):
+    """Only real links are clickable; placeholders and failed uploads show as blank."""
+    value = (value or "").strip()
+    if value.startswith("http") and "upload_failed" not in value:
+        return value
+    return ""
+
+
+def hours_until_rejection(applied_at_str):
+    """Hours left before the automatic rejection email may be sent (None if the date is unreadable)."""
+    try:
+        applied = datetime.strptime(applied_at_str.strip(), "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+    remaining = (applied + timedelta(hours=REJECTION_DELAY_HOURS) - datetime.now()).total_seconds() / 3600
+    return max(0.0, round(remaining, 1))
 
 
 # ==================== Streamlit UI ====================
@@ -364,6 +442,16 @@ with tab1:
     job_profiles = load_job_profiles()
     job_profile_names = list(job_profiles.keys())
 
+    # Demo: start with the sample job already loaded so visitors can score resumes immediately
+    if config.DEMO_MODE and not st.session_state.get("demo_profile_loaded"):
+        sample = job_profiles.get(SAMPLE_PROFILE_NAME)
+        if sample:
+            st.session_state.profile_selector = SAMPLE_PROFILE_NAME
+            st.session_state.current_job_title = SAMPLE_PROFILE_NAME
+            st.session_state.current_jd = sample["jd"]
+            st.session_state.custom_rules = sample["rules"]
+        st.session_state.demo_profile_loaded = True
+
     def on_profile_change():
         selected = st.session_state.profile_selector
         if selected == NEW_JOB:
@@ -382,6 +470,8 @@ with tab1:
         key="profile_selector",
         on_change=on_profile_change,
     )
+    if st.session_state.get("profile_selector", NEW_JOB) != NEW_JOB:
+        st.button("🗑️ Delete this saved profile", on_click=delete_selected_profile)
     st.text_input("Job title you are currently hiring for:", key="current_job_title")
 
     with st.expander("📝 Edit job requirements (JD) and AI scoring rules", expanded=True):
@@ -430,6 +520,9 @@ with tab1:
                 height=415,
                 placeholder="• Deduction: -15 if the candidate has no Python experience\n• Bonus: +5 for cloud deployment experience",
             )
+            rule_warnings, rules_have_points = analyze_rules(st.session_state.custom_rules) if st.session_state.custom_rules.strip() else ([], True)
+            for warning_text in rule_warnings:
+                st.warning(warning_text)
 
         st.write("")
         if st.button("💾 Save this job profile (JD + scoring rules)", type="secondary", use_container_width=True):
@@ -437,12 +530,83 @@ with tab1:
             if not job_name:
                 st.error("⚠️ Enter a job title above before saving.")
             else:
+                existed = job_name in job_profiles
                 job_profiles[job_name] = {
                     "jd": st.session_state.current_jd,
                     "rules": st.session_state.custom_rules,
                 }
                 save_job_profiles(job_profiles)
-                st.success(f"✅ Saved the JD and scoring rules as the profile \"{job_name}\". Load it from the dropdown next time.")
+                verb = "Updated the existing profile" if existed else "Saved the JD and scoring rules as the profile"
+                st.success(f"✅ {verb} \"{job_name}\". Load it from the dropdown next time.")
+                if config.DEMO_MODE:
+                    st.caption("Demo mode: saved profiles are kept only in your browser session.")
+
+    sample_dir = os.path.join(APP_DIR, "sample_resumes")
+    sample_files = sorted(f for f in os.listdir(sample_dir) if f.lower().endswith(".pdf")) if os.path.isdir(sample_dir) else []
+    with st.expander("🧪 Test these rules on the sample resumes (nothing is saved)"):
+        st.caption(
+            "Dry run: scores the chosen sample resumes with the JD and rules above, so you can see what a rule change does "
+            "before you use it. Nothing is written to the sheet and no emails are queued. Each resume is one AI call, "
+            "and results can vary by a few points between runs."
+        )
+        if not sample_files:
+            st.info("No sample resumes found.")
+        else:
+            test_choice = st.multiselect("Sample resumes to test with:", sample_files, default=sample_files, key="test_files")
+            if st.button("▶️ Run the test", key="run_rule_test"):
+                if not (st.session_state.current_jd.strip() and st.session_state.custom_rules.strip()):
+                    st.warning("⚠️ Fill in the JD and the scoring rules first.")
+                elif not analyze_rules(st.session_state.custom_rules)[1]:
+                    st.warning("⚠️ The scoring rules contain no point values (such as -15 or +5).")
+                elif not test_choice:
+                    st.info("Choose at least one sample resume.")
+                else:
+                    results = []
+                    progress = st.progress(0.0, text="Scoring sample resumes...")
+                    for i, sample_name in enumerate(test_choice):
+                        try:
+                            with pdfplumber.open(os.path.join(sample_dir, sample_name)) as pdf:
+                                sample_text = "".join([p.extract_text() or "" for p in pdf.pages])
+                            raw, ok = score_resume(
+                                sample_name,
+                                sample_text,
+                                st.session_state.current_jd,
+                                st.session_state.custom_rules,
+                                st.session_state.current_job_title or "Test job",
+                            )
+                            if not ok:
+                                raise ValueError(raw)
+                            scored = parse_scoring_response(raw)
+                            results.append({"file": sample_name, "ok": True, "data": scored})
+                        except Exception as test_error:  # noqa: BLE001 - show any failure per resume
+                            results.append({"file": sample_name, "ok": False, "error": str(test_error)})
+                        progress.progress((i + 1) / len(test_choice), text=f"Scored {i + 1} of {len(test_choice)}")
+                    progress.empty()
+                    st.session_state.rule_test_results = results
+
+            results = st.session_state.get("rule_test_results")
+            if results:
+                good = [r for r in results if r["ok"]]
+                st.markdown(
+                    f"**Result:** {sum(1 for r in good if r['data']['score'] >= SCORE_THRESHOLD)} of {len(good)} scored resumes "
+                    f"would reach the hiring manager ({SCORE_THRESHOLD}+), the rest would be auto-rejected."
+                )
+                table = [
+                    {
+                        "Resume": r["file"],
+                        "Candidate": r["data"].get("name", ""),
+                        "Score": r["data"]["score"],
+                        "Outcome": "→ Manager review" if r["data"]["score"] >= SCORE_THRESHOLD else "→ Auto-rejection",
+                    }
+                    for r in good
+                ]
+                if table:
+                    st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
+                    for r in good:
+                        st.markdown(f"- **{r['data'].get('name', r['file'])}**: {r['data']['score_calculation']}")
+                for r in results:
+                    if not r["ok"]:
+                        st.error(f"{r['file']}: {r['error']}")
 
     st.divider()
     uploaded_files = st.file_uploader("📥 Upload candidate resumes (multiple files allowed)", type=["pdf"], accept_multiple_files=True)
@@ -456,6 +620,8 @@ with tab1:
             or not st.session_state.current_job_title.strip()
         ):
             st.warning("⚠️ Job title, JD and scoring rules must not be empty.")
+        elif not analyze_rules(st.session_state.custom_rules)[1]:
+            st.warning("⚠️ The scoring rules contain no point values (such as -15 or +5), so scores cannot be computed. Please fix the rules first.")
         else:
             with st.status("🤖 AI interviewer starting...", expanded=True) as status:
                 for file in uploaded_files:
@@ -482,10 +648,7 @@ with tab1:
 
                     if is_ok:
                         try:
-                            match = re.search(r"\{[\s\S]*\}", result_json)
-                            clean_json = match.group(0) if match else result_json
-
-                            data_dict = json.loads(clean_json)
+                            data_dict = parse_scoring_response(result_json)
                             msg = write_to_google_sheet(data_dict, real_url)
 
                             if "❌" in msg or "🛑" in msg:
@@ -493,8 +656,8 @@ with tab1:
                             else:
                                 st.success(msg)
 
-                        except json.JSONDecodeError:
-                            st.error(f"❌ The AI response for {file.name} was malformed.")
+                        except ValueError as parse_error:
+                            st.error(f"❌ The AI response for {file.name} was unusable and was NOT written: {parse_error}")
                             with st.expander("🔍 View the raw response"):
                                 st.code(result_json)
                     else:
@@ -512,7 +675,8 @@ with tab1:
 with tab2:
     st.header("👨‍💼 Manager Review Board")
     st.info(
-        f"💡 **How review works**\n\nResumes the AI scored {SCORE_THRESHOLD} or higher are reviewed by the hiring manager. "
+        f"💡 **How review works**\n\nResumes the AI scored {SCORE_THRESHOLD} or higher appear here for the hiring manager, "
+        "plus any lower-scoring candidate you move back from the auto-rejected list below. "
         "Tick the box to invite a candidate to interview. If the candidate is not a fit, leave the box unticked and "
         "**always write the reason in the comment column**, so HR can analyze the funnel and adjust the hiring strategy."
     )
@@ -539,6 +703,7 @@ with tab2:
                         st.rerun()
 
                 review_data = []
+                review_details = []
                 for idx, row in enumerate(all_rows[1:], start=2):
                     row = pad_row(row)
                     job_title_in_sheet = row[1].strip()
@@ -556,8 +721,11 @@ with tab2:
                                 "AI Rationale": row[15],
                                 "✅ Approve Interview": row[5].strip().upper() == "TRUE",
                                 "📝 Manager Comment": row[6],
-                                "Resume": row[16],
+                                "Resume": clean_resume_url(row[16]),
                             }
+                        )
+                        review_details.append(
+                            {"name": row[2], "score": int(row[4]) if row[4].isdigit() else 0, "reason": row[15], "calc": row[17]}
                         )
 
                 if review_data:
@@ -575,6 +743,12 @@ with tab2:
                         hide_index=True,
                         use_container_width=True,
                     )
+
+                    with st.expander("📖 Full AI rationale and scoring arithmetic", expanded=True):
+                        for item in review_details:
+                            st.markdown(f"- **{item['name']}** (score {item['score']}): {item['reason']}")
+                            if item["calc"]:
+                                st.caption(f"Score arithmetic: {item['calc']}")
 
                     if st.button("💾 Save review decisions and sync to the cloud", type="primary"):
                         with st.spinner("Syncing the manager's decisions to Google Sheets..."):
@@ -599,6 +773,77 @@ with tab2:
                                 st.info("No changes to save.")
                 else:
                     st.info(f"👉 No resumes are waiting for manager review under \"{selected_job_tab2}\".")
+
+                # ---- Safety net: let the manager look at AI-rejected candidates and move them back ----
+                st.divider()
+                rescue_data = []
+                for idx, row in enumerate(all_rows[1:], start=2):
+                    row = pad_row(row)
+                    if row[0].strip() != STATUS_PENDING_REJECTION:
+                        continue
+                    if selected_job_tab2 != ALL_JOBS and row[1].strip() != selected_job_tab2:
+                        continue
+                    rescue_data.append(
+                        {
+                            "Sheet_Row": idx,
+                            "Job": row[1].strip(),
+                            "Name": row[2],
+                            "AI Score": int(row[4]) if row[4].isdigit() else 0,
+                            "Hours left": hours_until_rejection(row[7]),
+                            "↩️ Move back to review": False,
+                            "AI Rationale": row[15],
+                            "Resume": clean_resume_url(row[16]),
+                            "Score arithmetic": row[17],
+                        }
+                    )
+
+                with st.expander(
+                    f"🔎 Auto-rejected candidates (score below {SCORE_THRESHOLD}, rejection email not sent yet): {len(rescue_data)}"
+                ):
+                    st.caption(
+                        f"The AI rejected these candidates. Their rejection email is sent {REJECTION_DELAY_HOURS} hours after they "
+                        "applied, so until then you can read the AI's reasoning and move anyone back to the review board above. "
+                        "Once the email is sent, the decision is final."
+                    )
+                    if rescue_data:
+                        rdf = pd.DataFrame(rescue_data)
+                        redited = st.data_editor(
+                            rdf,
+                            key="rescue_editor",
+                            column_config={
+                                "Sheet_Row": None,
+                                "Score arithmetic": None,
+                                "Resume": st.column_config.LinkColumn("Resume", display_text="Open resume"),
+                                "↩️ Move back to review": st.column_config.CheckboxColumn("↩️ Move back to review", default=False),
+                                "AI Rationale": st.column_config.TextColumn("AI Rationale (click to expand)", width="large"),
+                                "Hours left": st.column_config.NumberColumn("Hours until email", format="%.1f"),
+                            },
+                            disabled=["Job", "Name", "AI Score", "Hours left", "AI Rationale", "Resume", "Score arithmetic"],
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+                        st.markdown("**Full AI rationale**")
+                        for item in rescue_data:
+                            st.markdown(f"- **{item['Name']}** (score {item['AI Score']}): {item['AI Rationale']}")
+                            if item["Score arithmetic"]:
+                                st.caption(f"Score arithmetic: {item['Score arithmetic']}")
+
+                        if st.button("↩️ Move selected candidates back to manager review", key="rescue_btn"):
+                            chosen = redited.loc[redited["↩️ Move back to review"], "Sheet_Row"].tolist()
+                            if not chosen:
+                                st.info("Tick at least one candidate first.")
+                            else:
+                                with st.spinner("Updating Google Sheets..."):
+                                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                                    for row_idx in chosen:
+                                        sheet.update_cell(int(row_idx), 1, STATUS_PENDING_REVIEW)
+                                        sheet.update_cell(int(row_idx), 9, now_str)
+                                st.success(f"✅ Moved {len(chosen)} candidate(s) back to the review board.")
+                                st.session_state.pop("rescue_editor", None)  # drop stale cell edits before the rows change
+                                time.sleep(1)
+                                st.rerun()
+                    else:
+                        st.caption("No auto-rejected candidates are waiting right now.")
         else:
             st.success("🎉 No resumes need manager review right now.")
 
@@ -607,6 +852,20 @@ with tab2:
 # ---------------------------------------------------------
 with tab3:
     st.header("📬 Automated Email Routing")
+
+    if config.DEMO_MODE and st.session_state.get("demo_emails"):
+        previews = st.session_state.demo_emails
+        with st.expander(f"📧 Demo email previews: {len(previews)} email(s), NOT actually sent", expanded=True):
+            for i, mail in enumerate(previews, start=1):
+                st.markdown(f"**{i}. To:** {mail['to']}  \n**Subject:** {mail['subject']}")
+                if "<br>" in mail["body"]:
+                    st.markdown(mail["body"], unsafe_allow_html=True)
+                else:
+                    st.text(mail["body"])
+                st.divider()
+            if st.button("Clear previews", key="clear_demo_emails"):
+                st.session_state.demo_emails = []
+                st.rerun()
 
     if sheet:
         all_rows = sheet.get_all_values()
@@ -640,7 +899,7 @@ with tab3:
                 if selected_job_tab3 != ALL_JOBS and job_title != selected_job_tab3:
                     continue
 
-                if status == STATUS_PENDING_REJECTION and score < SCORE_THRESHOLD:
+                if status == STATUS_PENDING_REJECTION:
                     time_info = " (could not parse application time)"
                     try:
                         applied_time = datetime.strptime(applied_at_str, "%Y-%m-%d %H:%M")
@@ -660,15 +919,10 @@ with tab3:
                         pass
                     names_reject.append(f"• {name} {time_info} [applied: {job_title}]")
 
-                elif status == STATUS_PENDING_REVIEW and score >= SCORE_THRESHOLD and manager_approve_str == "TRUE":
+                elif status == STATUS_PENDING_REVIEW and manager_approve_str == "TRUE":
                     names_pending_invite.append(f"• {name} [applied: {job_title}]")
 
-                elif (
-                    status == STATUS_PENDING_REVIEW
-                    and score >= SCORE_THRESHOLD
-                    and manager_approve_str == "FALSE"
-                    and manager_comment != ""
-                ):
+                elif status == STATUS_PENDING_REVIEW and manager_approve_str == "FALSE" and manager_comment != "":
                     names_manager_reject.append(f"• {name} [applied: {job_title}]")
 
             col1, col2, col3 = st.columns(3)
@@ -689,6 +943,13 @@ with tab3:
 
             st.divider()
 
+            skip_wait = False
+            if config.DEMO_MODE:
+                skip_wait = st.checkbox(
+                    f"Demo only: skip the {REJECTION_DELAY_HOURS}-hour wait so automatic rejection emails are sent now",
+                    key="demo_skip_wait",
+                )
+
             if st.button(
                 f"⚡ Run the email state machine (send emails for \"{selected_job_tab3}\")",
                 type="primary",
@@ -703,6 +964,7 @@ with tab3:
                         try:
                             yag = DemoMailer() if config.DEMO_MODE else yagmail.SMTP(user=SENDER_EMAIL, password=GMAIL_APP_PASSWORD)
                             trigger_count = 0
+                            delay_hours = 0 if skip_wait else REJECTION_DELAY_HOURS
 
                             for idx, row in enumerate(all_rows[1:], start=2):
                                 row = pad_row(row)
@@ -721,14 +983,16 @@ with tab3:
                                 if status not in [STATUS_PENDING_REVIEW, STATUS_PENDING_REJECTION]:
                                     continue
 
-                                if score < SCORE_THRESHOLD:
+                                # Routing is driven by STATUS, not score: a candidate the manager moved back
+                                # to review keeps a low score but must follow the manager's decision.
+                                if status == STATUS_PENDING_REJECTION:
                                     try:
                                         applied_time = datetime.strptime(applied_at_str, "%Y-%m-%d %H:%M")
-                                        is_past_two_days = current_time >= (applied_time + timedelta(hours=REJECTION_DELAY_HOURS))
+                                        is_past_delay = current_time >= (applied_time + timedelta(hours=delay_hours))
                                     except ValueError:
-                                        is_past_two_days = False
+                                        is_past_delay = False
 
-                                    if is_past_two_days:
+                                    if is_past_delay:
                                         st.write(f"⚡ [Auto rejection] Sending a thank-you email to {name}...")
                                         subject = f"[{COMPANY_NAME}] Update on your application for \"{job_title}\""
                                         body = (
@@ -747,7 +1011,7 @@ with tab3:
                                         trigger_count += 1
                                         time.sleep(1)
 
-                                elif score >= SCORE_THRESHOLD and manager_approve_str == "TRUE":
+                                elif status == STATUS_PENDING_REVIEW and manager_approve_str == "TRUE":
                                     st.write(f"🚀 [Manager approved] Sending an interview invitation to {name}...")
                                     subject = f"[Interview Invitation] {COMPANY_NAME} - \"{job_title}\" team interview"
                                     booking_url = f"{config.BOOKING_APP_URL}?{urlencode({'name': name, 'email': email})}"
@@ -767,7 +1031,7 @@ Sincerely,<br>The {COMPANY_NAME} Recruiting Team
                                     trigger_count += 1
                                     time.sleep(1)
 
-                                elif score >= SCORE_THRESHOLD and manager_approve_str == "FALSE" and manager_comment != "":
+                                elif status == STATUS_PENDING_REVIEW and manager_approve_str == "FALSE" and manager_comment != "":
                                     st.write(f"📝 [Manager declined] Sending a thank-you email to {name}...")
                                     subject = f"[{COMPANY_NAME}] Update on your application for \"{job_title}\""
                                     body = (
@@ -809,7 +1073,10 @@ with tab4:
                 if sheet:
                     raw_vals = sheet.get_all_values()
                     if len(raw_vals) > 1:
-                        st.session_state.df_dash = pd.DataFrame(raw_vals[1:], columns=raw_vals[0])
+                        width = max(len(r) for r in raw_vals)
+                        header = raw_vals[0] + [f"extra_{i}" for i in range(len(raw_vals[0]), width)]
+                        body = [r + [""] * (width - len(r)) for r in raw_vals[1:]]
+                        st.session_state.df_dash = pd.DataFrame(body, columns=header)
                         st.success("✅ Data synced.")
                     else:
                         st.warning("There is no recruiting data in the sheet yet.")

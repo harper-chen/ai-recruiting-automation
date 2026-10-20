@@ -69,6 +69,7 @@ def get_interviewer_emails():
 COMPANY_NAME = get_setting("COMPANY_NAME", "Acme Technology Ltd.")
 CONTACT_PHONE = get_setting("CONTACT_PHONE", "555-0100")
 SHEET_NAME = get_setting("SHEET_NAME", "HR Applicant Tracker")
+REPO_URL = get_setting("REPO_URL", "https://github.com/harper-chen/ai-recruiting-automation")  # where sample resumes are linked from in demo mode
 APPS_SCRIPT_URL = get_setting("APPS_SCRIPT_URL")      # resume-upload proxy (see apps_script/)
 BOOKING_APP_URL = get_setting("BOOKING_APP_URL")      # public URL of streamlit_app.py
 
