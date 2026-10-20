@@ -33,6 +33,9 @@ import config
 from config import (
     COMPANY_NAME,
     INVITED_STATUSES,
+    BASELINE_SCORE,
+    REJECTION_DELAY_HOURS,
+    RULE_GUIDE,
     SCORE_THRESHOLD,
     STATUS_HIRED,
     STATUS_INVITED_NO_REPLY,
@@ -143,7 +146,6 @@ def save_job_profiles(profiles_dict):
 
 
 # ==================== Core functions ====================
-BASELINE_SCORE = 70  # every candidate starts here; rules add or subtract
 MODEL_NAME = "gemini-2.5-flash"
 MAX_AI_ATTEMPTS = 3
 
@@ -175,10 +177,10 @@ def generate_rules_from_jd(jd_text):
     - Every candidate starts at a baseline of {BASELINE_SCORE} points. The final score is capped between 0 and 100.
     - A final score below {SCORE_THRESHOLD} means automatic rejection; {SCORE_THRESHOLD} or above goes to a hiring manager.
     - So a candidate missing one or two REQUIRED items from the JD must end up below {SCORE_THRESHOLD}. Calibrate the point values accordingly:
-      * missing a hard requirement the JD lists as required: 10 to 20 points each
-      * clearly above the JD's salary range: 10 to 15 points
-      * minor or soft gaps (e.g. no proof of English level): 2 to 5 points
-      * nice-to-have skills or distinctive experience: +3 to +8 points each
+      * missing a hard requirement the JD lists as required: {RULE_GUIDE['required_miss'][0]} to {RULE_GUIDE['required_miss'][1]} points each
+      * clearly above the JD's salary range: {RULE_GUIDE['salary_over'][0]} to {RULE_GUIDE['salary_over'][1]} points
+      * minor or soft gaps (e.g. no proof of English level): {RULE_GUIDE['minor_gap'][0]} to {RULE_GUIDE['minor_gap'][1]} points
+      * nice-to-have skills or distinctive experience: +{RULE_GUIDE['bonus'][0]} to +{RULE_GUIDE['bonus'][1]} points each
     - State every point value explicitly as a number.
 
     [CONTENT REQUIREMENTS]:
@@ -412,8 +414,22 @@ with tab1:
 
         with col2:
             st.markdown("### ⚖️ 2. AI scoring and deduction rules")
+            st.info(
+                "**How scoring works**\n\n"
+                f"- Every candidate starts at **{BASELINE_SCORE}** points. Your rules add or subtract from this; the final score is 0 to 100.\n"
+                f"- **Below {SCORE_THRESHOLD}:** automatic rejection email (sent {REJECTION_DELAY_HOURS} hours after applying). "
+                f"**{SCORE_THRESHOLD} or above:** goes to the hiring manager.\n"
+                f"- **Tip:** missing a required item should cost {RULE_GUIDE['required_miss'][0]} to {RULE_GUIDE['required_miss'][1]} points; "
+                f"minor gaps {RULE_GUIDE['minor_gap'][0]} to {RULE_GUIDE['minor_gap'][1]}; "
+                f"nice-to-have skills +{RULE_GUIDE['bonus'][0]} to +{RULE_GUIDE['bonus'][1]}."
+            )
             st.caption("Type your own rules, or use the button on the left to have AI draft them in a clean format.")
-            st.text_area("Enter your evaluation and deduction logic:", key="custom_rules", height=415)
+            st.text_area(
+                "Enter your evaluation and deduction logic:",
+                key="custom_rules",
+                height=415,
+                placeholder="• Deduction: -15 if the candidate has no Python experience\n• Bonus: +5 for cloud deployment experience",
+            )
 
         st.write("")
         if st.button("💾 Save this job profile (JD + scoring rules)", type="secondary", use_container_width=True):
@@ -628,11 +644,11 @@ with tab3:
                     time_info = " (could not parse application time)"
                     try:
                         applied_time = datetime.strptime(applied_at_str, "%Y-%m-%d %H:%M")
-                        target_send_time = applied_time + timedelta(days=2)
+                        target_send_time = applied_time + timedelta(hours=REJECTION_DELAY_HOURS)
                         time_diff = target_send_time - current_time
 
                         if time_diff.total_seconds() <= 0:
-                            time_info = " 🔴 (48 hours elapsed, will send immediately)"
+                            time_info = f" 🔴 ({REJECTION_DELAY_HOURS} hours elapsed, will send immediately)"
                         else:
                             days = time_diff.days
                             hours = time_diff.seconds // 3600
@@ -708,7 +724,7 @@ with tab3:
                                 if score < SCORE_THRESHOLD:
                                     try:
                                         applied_time = datetime.strptime(applied_at_str, "%Y-%m-%d %H:%M")
-                                        is_past_two_days = current_time >= (applied_time + timedelta(days=2))
+                                        is_past_two_days = current_time >= (applied_time + timedelta(hours=REJECTION_DELAY_HOURS))
                                     except ValueError:
                                         is_past_two_days = False
 

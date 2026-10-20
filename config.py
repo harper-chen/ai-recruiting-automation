@@ -89,7 +89,18 @@ INTERVIEW_TAG = "[Interview]"  # prefix of every calendar event this app creates
 # change one, update the Sheet's data-validation dropdown too.
 # ---------------------------------------------------------------------------
 
-SCORE_THRESHOLD = 60  # below -> auto rejection, at or above -> manager review
+BASELINE_SCORE = 70           # every candidate starts here; the job's rules add or subtract
+SCORE_THRESHOLD = 60          # below -> auto rejection, at or above -> manager review
+REJECTION_DELAY_HOURS = 48    # automatic rejection emails wait this long after applying
+
+# Suggested point ranges, shown to recruiters and given to the rule-drafting model.
+# Calibrated so that missing one or two REQUIRED items drops a candidate below the threshold.
+RULE_GUIDE = {
+    "required_miss": (10, 20),   # a hard requirement the JD lists as required
+    "salary_over": (10, 15),     # expected salary clearly above the JD range
+    "minor_gap": (2, 5),         # soft gaps, e.g. no proof of English level
+    "bonus": (3, 8),             # nice-to-have skills or distinctive experience
+}
 
 STATUS_PENDING_REJECTION = "AI Scored - Pending Rejection Email"
 STATUS_PENDING_REVIEW = "AI Scored - Pending Manager Review"
