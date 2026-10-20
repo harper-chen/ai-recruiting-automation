@@ -23,6 +23,7 @@ Add screenshots here after uploading them to docs/images/, for example:
 - **Sends the emails.** Interview invitations, rejection notes and booking confirmations are driven by a status column in Google Sheets.
 - **Books the interview.** Candidates pick from the interviewers' shared free time, a Google Meet room is created, and double booking is prevented.
 - **Shows where candidates drop out.** A dashboard covers the funnel, conversion by experience, rejection reasons, score vs. salary expectation and skill premium.
+- **Explains the numbers.** One click turns the current dashboard view into a short written report: findings, recommendations (for example a salary range or a requirement that fires for most applicants) and caveats. The app computes every statistic; the AI only explains them and never sees names, emails or resumes.
 
 ## Why it exists
 
@@ -64,7 +65,7 @@ If a hired candidate declines or takes another offer, HR can set `Offer Declined
 3. In **Manager Review**, click a cell in the *AI Rationale* or *Score arithmetic* column to read it in full, approve a candidate, decline another with a comment, and open the auto-rejected list to move someone back.
 4. In **Email Routing**, run the state machine. Emails are previewed on screen (never sent). Tick "skip the wait" to include the automatic rejections.
 5. Click the booking link in the invitation preview, choose a slot and confirm.
-6. In **Analytics Dashboard**, sync and explore the charts.
+6. In **Analytics Dashboard**, sync, explore the charts, then press *Generate insights* for the written report (the "numbers the AI was given" panel shows exactly what it saw).
 
 In demo mode no email is sent, no calendar event is created, and uploaded files are not stored. Saved job profiles live only in your own browser session. Candidates you upload are tagged with a private code (for example `ariel.lin+k3f9@example.com`, kept in the page URL), so many visitors can score the same sample resumes at the same time and each sees only their own in Manager Review and Email Routing. Visitor rows are deleted after 24 hours. The Analytics tab also shows about 40 fictional sample candidates, and a *Demo tools* panel lets a visitor clear their own candidates (the owner can reset the whole demo with an `ADMIN_KEY`). Identical resume + rules combinations reuse the earlier AI answer, which keeps the free Gemini quota for visitors who change something.
 
@@ -88,12 +89,13 @@ This is a class project, not a production hiring system.
 - **Scores are not perfectly repeatable.** Scoring the same resume twice can differ by a few points, so candidates near the threshold may land on either side of it.
 - **Rule quality matters.** The AI drafts the scoring rules, but a recruiter must read and tune them. Strict rules (such as requiring specific degree majors) can screen out capable candidates.
 - **The public demo is shared infrastructure.** All visitors use one Google Sheet and one free-tier Gemini key (a small daily request limit), so the demo can show a "quota used up" message at busy times. Its analytics include other visitors' recent uploads.
+- **The AI report is a discussion starter.** It only reads aggregated statistics, but small samples and correlation-not-causation apply, and the sample data in the demo was generated to show these charts, so its "findings" are illustrative.
 - **Retries are minimal.** AI calls retry up to three times with backoff on errors such as `503 UNAVAILABLE`; there is no queueing or rate limiting.
 - **Concurrency.** Google Sheets is the database and `bookings.json` is a local file, so two simultaneous bookings can race. Slot protection is best-effort, and the file is lost when a free cloud host restarts.
 - **Positional columns.** Reading the sheet by column index is brittle if columns are reordered.
 - **The rejection-reason chart uses keyword matching** on the AI's free-text rationale. Treat it as indicative.
 - **Fixed schedule and timezone.** Business hours, 1-hour interviews and Taipei time (GMT+8) are constants in the code.
-- **Light test coverage.** Unit tests cover the scoring arithmetic, rule checks and demo helpers (`python -m unittest`); the Streamlit UI, Sheets, Calendar and email paths are tested by hand only.
+- **Light test coverage.** Unit tests cover the scoring arithmetic, rule checks, demo helpers and the analytics summary (`python -m unittest`); the Streamlit UI, Sheets, Calendar and email paths are tested by hand only.
 
 ## Team
 
@@ -128,6 +130,7 @@ The `status` values are defined in `config.py` and must match the sheet exactly 
 .
 ├── app.py                      # HR Command Center (4 tabs)
 ├── streamlit_app.py            # Candidate interview booking page
+├── insights.py                 # Analytics statistics + prompt for the AI report (no personal data)
 ├── demo_support.py             # Demo-only helpers: visitor tags, sample candidates, cleanup plan
 ├── scoring.py                  # Pure score arithmetic + rule checks (unit tested)
 ├── tests/                      # Unit tests for scoring.py and demo_support.py

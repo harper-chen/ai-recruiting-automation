@@ -34,6 +34,8 @@ from plotly.subplots import make_subplots
 
 import config
 import demo_support
+import insights
+from insights import categorize_reason
 from scoring import analyze_rules as _analyze_rules
 from scoring import parse_scoring_response as _parse_scoring_response
 from config import (
@@ -354,6 +356,23 @@ def generate_rules_from_jd(jd_text):
         return text
     except Exception as e:
         return f"⚠️ Rule generation failed: {e}"
+
+
+def generate_insights_report(summary):
+    """Plain-language report on the analytics numbers. The statistics come from code (insights.py)."""
+    prompt = insights.build_prompt(summary)
+    cache = demo_ai_cache() if config.DEMO_MODE else None
+    cache_key = "report:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]["raw"]
+    try:
+        response = generate_with_retry(prompt)
+        text = response.text.strip()
+        if cache is not None:
+            cache[cache_key] = {"raw": text, "at": datetime.now()}
+        return text
+    except Exception as e:
+        return f"⚠️ Could not generate the report: {e}"
 
 
 UPLOAD_FAILED_URL = "https://drive.google.com/resume/upload_failed"
@@ -1363,33 +1382,6 @@ with tab4:
                     # Rejection reasons (donut)
                     df_rej = df_dash[~df_dash["status"].isin(INVITED_STATUSES)].copy()
 
-                    # Keyword classifier over free text. English keywords, because the AI is told to
-                    # write score_reason in English. Salary phrases are specific ("over budget") on purpose:
-                    # a bare "salary" would also match "salary within budget".
-                    MANAGER_SALARY_WORDS = ["budget", "salary", "pay", "compensation", "expensive", "cost"]
-                    AI_SALARY_PATTERNS = (
-                        r"over budget|above budget|exceed(?:s|ed|ing)? (?:the )?(?:budget|range|salary)|"
-                        r"above the (?:range|budget)|"
-                        r"too high|overpriced|salary expectation (?:is )?(?:too )?high|higher than"
-                    )
-                    AI_SKILL_PATTERNS = (
-                        r"\b(?:lack|lacks|lacking|no|not|limited|insufficient|missing|without|unfamiliar|"
-                        r"basic|junior|mismatch|gap|weak)\b"
-                    )
-
-                    def categorize_reason(row):
-                        comment = str(row.get("manager_comment", "") or "").strip()
-                        if comment:
-                            if any(k in comment.lower() for k in MANAGER_SALARY_WORDS):
-                                return "Manager: salary/budget mismatch"
-                            return "Manager: other mismatch"
-                        reason = str(row.get("score_reason", "")).lower()
-                        if re.search(AI_SALARY_PATTERNS, reason):
-                            return "AI: salary expectation too high"
-                        if re.search(AI_SKILL_PATTERNS, reason):
-                            return "AI: insufficient skills/experience"
-                        return "AI: other mismatch"
-
                     if not df_rej.empty:
                         df_rej["fail_reason"] = df_rej.apply(categorize_reason, axis=1)
                         reason_counts = df_rej["fail_reason"].value_counts()
@@ -1485,6 +1477,30 @@ with tab4:
                     fig_skills.update_yaxes(title_text="Candidates with this skill", secondary_y=False)
                     fig_skills.update_yaxes(title_text="Avg. expected salary of this group (TWD)", secondary_y=True)
                     st.plotly_chart(fig_skills, use_container_width=True)
+
+                # ================= AI report =================
+                st.divider()
+                st.subheader("🤖 AI hiring insights")
+                st.caption(
+                    "The app computes every number from the data above (filters included). The AI only explains them, and it "
+                    "never sees names, emails or resumes. Treat the result as a starting point for discussion, not a decision."
+                )
+                if st.button("✨ Generate insights for this view", key="gen_insights"):
+                    insight_summary = insights.build_summary(
+                        df_dash, INVITED_STATUSES, STATUS_HIRED, SCORE_THRESHOLD, is_demo=config.DEMO_MODE
+                    )
+                    with st.spinner("The AI is reading the numbers..."):
+                        st.session_state.analytics_report = {
+                            "text": generate_insights_report(insight_summary),
+                            "summary": insight_summary,
+                            "scope": f"job: {sel_dash_job} / window: {sel_dash_time}",
+                        }
+                report = st.session_state.get("analytics_report")
+                if report:
+                    st.caption(f"Report for {report['scope']}")
+                    st.markdown(report["text"].replace("$", "\\$"))
+                    with st.expander("🔢 The numbers the AI was given"):
+                        st.json(report["summary"])
 
             else:
                 st.warning("No applicants match the current filters.")
