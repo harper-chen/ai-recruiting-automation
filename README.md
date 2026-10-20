@@ -121,10 +121,10 @@ Built by a student team for a "Programming for Business" course.
 
 | Name | Role |
 |---|---|
-| _Name_ | _e.g. AI scoring and prompt design_ |
-| _Name_ | _e.g. Google Calendar and booking flow_ |
-| _Name_ | _e.g. dashboard and analytics_ |
-
+| Te-Chi Chen (team lead) | HR recruiting command center web app design; team code integration |
+| Qi Ding | Interview scheduling system web app design |
+| Yi-Xuan Yang | Interviewer availability (free-slot) algorithm design |
+| Rui-Yun Zhuang | Plotly chart design |
 ## License
 
 No license is specified yet; all rights reserved by the authors until one is added.
