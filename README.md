@@ -66,7 +66,7 @@ If a hired candidate declines or takes another offer, HR can set `Offer Declined
 5. Click the booking link in the invitation preview, choose a slot and confirm.
 6. In **Analytics Dashboard**, sync and explore the charts.
 
-In demo mode no email is sent, no calendar event is created, and uploaded files are not stored. Saved job profiles live only in your own browser session. Candidates you upload are tagged with a private code (for example `ariel.lin+k3f9@example.com`, kept in the page URL), so many visitors can score the same sample resumes at the same time and each sees only their own in Manager Review and Email Routing. Visitor rows are deleted after 24 hours. The Analytics tab also shows about 40 fictional sample candidates, and a *Demo tools* panel can reset everything. Identical resume + rules combinations reuse the earlier AI answer, which keeps the free Gemini quota for visitors who change something.
+In demo mode no email is sent, no calendar event is created, and uploaded files are not stored. Saved job profiles live only in your own browser session. Candidates you upload are tagged with a private code (for example `ariel.lin+k3f9@example.com`, kept in the page URL), so many visitors can score the same sample resumes at the same time and each sees only their own in Manager Review and Email Routing. Visitor rows are deleted after 24 hours. The Analytics tab also shows about 40 fictional sample candidates, and a *Demo tools* panel lets a visitor clear their own candidates (the owner can reset the whole demo with an `ADMIN_KEY`). Identical resume + rules combinations reuse the earlier AI answer, which keeps the free Gemini quota for visitors who change something.
 
 ## Run it yourself
 

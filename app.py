@@ -12,6 +12,7 @@ Google Sheets is the single source of truth; every state change is written back 
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -170,6 +171,29 @@ def demo_housekeeping(force_reset=False):
         if reseed:
             seed_rows = demo_support.build_seed_rows(now, seed_statuses, BASELINE_SCORE, SCORE_THRESHOLD)
             sheet.append_rows(seed_rows, value_input_option="RAW")
+
+
+def clear_my_candidates():
+    """Demo only: delete just this visitor's rows (other visitors and the sample candidates are untouched)."""
+    if sheet is None:
+        return 0
+    with housekeeping_lock():
+        mine = demo_support.visitor_rows(sheet.get_all_values(), st.session_state.get("visitor_tag"))
+        for first, last in demo_support.contiguous_ranges(mine):
+            sheet.delete_rows(first, last)
+    return len(mine)
+
+
+def is_demo_admin():
+    """Full reset is for the owner only: the URL must carry ?admin=<ADMIN_KEY> and ADMIN_KEY must be set in secrets."""
+    key = config.get_setting("ADMIN_KEY")
+    if not key:
+        return False
+    try:
+        supplied = st.query_params.get("admin", "")
+    except Exception:  # noqa: BLE001
+        return False
+    return hmac.compare_digest(str(supplied), str(key))
 
 
 if config.DEMO_MODE and sheet is not None and not st.session_state.get("housekeeping_done"):
@@ -558,14 +582,23 @@ if config.DEMO_MODE:
             f"Your private code is **{st.session_state.get('visitor_tag')}**. Only candidates tagged with it appear in "
             "Manager Review and Email Routing. Keep this page's URL (it contains the code) to come back to them."
         )
-        confirm_reset = st.checkbox("I understand this deletes every candidate in the demo sheet, for all visitors", key="confirm_reset")
-        if st.button("♻️ Reset demo data", disabled=not confirm_reset):
+        if st.button("🧹 Clear my candidates", key="clear_mine"):
             try:
-                demo_housekeeping(force_reset=True)
-                st.session_state.df_dash = pd.DataFrame()
-                st.success("Demo data reset: all candidates were removed and the sample candidates reloaded.")
-            except Exception as reset_error:  # noqa: BLE001
-                st.error(f"Reset failed: {reset_error}")
+                removed = clear_my_candidates()
+                st.success(f"Removed {removed} of your candidate(s). Other visitors' data is untouched.")
+            except Exception as clear_error:  # noqa: BLE001
+                st.error(f"Could not clear your candidates: {clear_error}")
+        if is_demo_admin():
+            st.divider()
+            st.caption("Owner only: this reloads the whole demo sheet.")
+            confirm_reset = st.checkbox("I understand this deletes every candidate in the demo sheet, for all visitors", key="confirm_reset")
+            if st.button("♻️ Reset demo data (all visitors)", disabled=not confirm_reset):
+                try:
+                    demo_housekeeping(force_reset=True)
+                    st.session_state.df_dash = pd.DataFrame()
+                    st.success("Demo data reset: all candidates were removed and the sample candidates reloaded.")
+                except Exception as reset_error:  # noqa: BLE001
+                    st.error(f"Reset failed: {reset_error}")
 tab1, tab2, tab3, tab4 = st.tabs(
     ["📥 AI Resume Parsing", "👨‍💼 Manager Review", "📬 Email Routing", "📊 Analytics Dashboard"]
 )

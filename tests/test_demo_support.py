@@ -84,6 +84,11 @@ class Housekeeping(unittest.TestCase):
         delete, _ = ds.plan_housekeeping([HEADER, self.fresh_seed(), old], NOW)
         self.assertEqual(delete, [3])
 
+    def test_visitor_rows_only_matches_that_visitor(self):
+        rows = [HEADER, self.fresh_seed(), row("a+k3f9@example.com", ""), row("b+zzzz@example.com", ""), row("c+k3f9@example.com", "")]
+        self.assertEqual(ds.visitor_rows(rows, "k3f9"), [3, 5])
+        self.assertEqual(ds.visitor_rows(rows, ""), [])
+
     def test_contiguous_ranges_delete_from_the_bottom(self):
         self.assertEqual(ds.contiguous_ranges([2, 3, 4, 9, 10, 20]), [(20, 20), (9, 10), (2, 4)])
         self.assertEqual(ds.contiguous_ranges([]), [])

@@ -101,6 +101,11 @@ def plan_housekeeping(rows, now, force_reset=False, max_age_hours=24, seed_max_a
     return sorted(set(delete)), reseed
 
 
+def visitor_rows(rows, tag):
+    """1-based sheet row numbers of the candidates that belong to one visitor."""
+    return [i for i, r in enumerate(rows[1:], start=2) if belongs_to_visitor(r[3] if len(r) > 3 else "", tag)]
+
+
 def contiguous_ranges(numbers):
     """[2,3,4,9,10] -> [(9,10),(2,4)]: inclusive ranges, last first, so deleting them never shifts later ones."""
     numbers = sorted(set(numbers))
