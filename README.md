@@ -119,7 +119,7 @@ This is a class project, not a production hiring system.
 
 ## Team
 
-Built by a student team for a "Programming for Business" course.
+Built by a student team for a "Programming for Business Computing" course.
 
 | Name | Role |
 |---|---|
