@@ -123,7 +123,7 @@ Built by a student team for a "Programming for Business" course.
 
 | Name | Role |
 |---|---|
-| Te-Chi Chen (team lead) | HR recruiting command center web app design; team code integration |
+| Te-Chi Chen (team lead) | Workflow design, scheduling workflow redesign (immediate booking), HR recruiting command center, team code integration |
 | Qi Ding | Interview scheduling system web app design |
 | Yi-Xuan Yang | Interviewer availability (free-slot) algorithm design |
 | Rui-Yun Zhuang | Plotly chart design |
