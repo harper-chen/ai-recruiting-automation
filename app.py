@@ -13,6 +13,7 @@ Google Sheets is the single source of truth; every state change is written back 
 import base64
 import hashlib
 import hmac
+import io
 import json
 import math
 import os
@@ -643,10 +644,20 @@ class BundledResume:
 
 @st.cache_data
 def sample_resume_preview(path):
-    """Picture of the first page, so visitors can see what the AI is reading."""
+    """First page as an HTML image, so visitors can see what the AI is reading.
+
+    Rendered at about twice the display width so it stays sharp on high-resolution (Retina) screens, and sent as
+    lossless PNG through HTML because st.image shrinks and recompresses images, which blurred the small text.
+    """
     with pdfplumber.open(path) as pdf:
-        # Rendered at about twice the display width, so it stays sharp on high-resolution (Retina) screens
-        return pdf.pages[0].to_image(resolution=200).original
+        page_image = pdf.pages[0].to_image(resolution=200).original
+    buffer = io.BytesIO()
+    page_image.save(buffer, format="PNG", optimize=True)
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return (
+        f'<img src="data:image/png;base64,{encoded}" alt="First page of the sample resume" '
+        'style="width:100%; max-width:800px; border:1px solid #e0e0e0; border-radius:6px;">'
+    )
 
 
 class DemoMailer:
@@ -862,8 +873,8 @@ with tab1:
         ) or []
         for name in chosen_samples:
             with st.expander(f"👀 Preview: {sample_choices[name]}"):
-                # Fixed width: stretching the page across a wide screen made it blurry and too large to read
-                st.image(sample_resume_preview(os.path.join(sample_dir, name)), width=800)
+                st.markdown(sample_resume_preview(os.path.join(sample_dir, name)), unsafe_allow_html=True)
+                st.markdown(f"[📄 Open the original PDF]({config.REPO_URL}/blob/main/sample_resumes/{name})")
         uploaded_files = [BundledResume(os.path.join(sample_dir, name)) for name in chosen_samples]
     else:
         uploaded_files = st.file_uploader(
