@@ -27,6 +27,15 @@ Before this project I worked in recruiting, first at a headhunting agency and th
 
 The goal is not to let AI decide who gets hired. It is to take the repetitive work off recruiters so their time goes to the judgment calls, and to give the team data to improve the process.
 
+## My role
+
+I led a four-person course team ([full team below](#team)). My part:
+
+- **Designed the workflow and the scoring method**: rules written from the job description, the AI reporting which rules apply, and the code computing every score.
+- **Built the HR Command Center**: resume scoring, manager review, email routing and analytics, plus the Google Sheets, Gmail, Calendar and Drive integrations.
+- **Redesigned interview scheduling** so candidates book a slot immediately instead of waiting for a batch schedule.
+- **Integrated the team's work** (booking page, free-slot algorithm, charts) into one working system, and maintain the live demo.
+
 ## How it works
 
 **1. The recruiter sets the screening rules.** Upload or paste a job description, and the AI drafts point-based scoring rules from it (for example, a deduction for a missing required skill). The recruiter reads, edits and saves them, so every resume is judged by the same written standard.
@@ -68,12 +77,18 @@ Each of these comes from a risk I wanted the system to avoid:
 - **Rules are written down and editable.** Recruiters can read and change every rule, and the app warns about rules with no point values or rules too lenient to ever reject anyone.
 - **The AI report never sees personal data.** The app computes every statistic first; the AI only explains aggregated numbers, never names, emails or resumes.
 
+## What I learned
+
+In November 2026, months after the course ended, the live demo suddenly stopped scoring resumes with the error `JSON mode is not enabled for api version v1`. The code had not changed. The deployment log showed why: the cloud host had installed version 3.0 of Google's AI library, a new major release whose default API version no longer supports the JSON output the app relies on, because `requirements.txt` accepted any version.
+
+I fixed it by setting the API version explicitly and capping the library below its next major version. I also found that the app retried this permanent error six times per resume, which used up the free daily quota, so it now stops at the first error that cannot succeed. I also saved the AI results for the sample resumes, so the demo keeps working when the quota runs out. The lesson I took away: code that depends on outside services needs pinned versions, explicit settings and a plan for when those services fail.
+
 ## Try the demo
 
 1. Open the **[HR Command Center](https://harper-hr-dashboard.streamlit.app/)**. A sample "Python Backend Engineer" job is already loaded: look over its job description and scoring rules, or press the AI button to draft new rules from the job description.
-2. Under **Resumes to evaluate**, keep the three sample resumes selected (preview any of them), then press **Start AI evaluation**. The app moves to **Manager Review** when scoring is done.
-3. Approve one candidate, decline another with a comment, and open **Auto-rejected candidates** to read the AI's reasoning or move someone back.
-4. In **Email Routing**, run the state machine to preview the emails. Tick "skip the wait" to include the automatic rejections.
+2. Under **Resumes to evaluate**, keep the three sample resumes selected (preview any of them), then press **Start AI evaluation**. When scoring is done, a summary appears; press **Go to Manager Review**.
+3. Approve one candidate, decline another with a comment, and open **Auto-rejected candidates** to read the AI's reasoning or move someone back. Save the decisions, then press **Go to Email Routing**.
+4. In **Email Routing**, press **Run the email state machine** to preview the emails (they are shown on screen, never sent). Tick "skip the wait" to include the automatic rejections.
 5. Click the link in the invitation preview to book an interview as that candidate. You can also open the **[Interview Booking](https://harper-interview-booking.streamlit.app/)** page directly and pick one of the built-in invited candidates.
 6. In **Analytics Dashboard**, sync the data, explore the charts and press **Generate insights** for the written report.
 
