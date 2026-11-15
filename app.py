@@ -14,6 +14,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import threading
@@ -619,6 +620,34 @@ def write_to_google_sheet(data_dict, real_resume_url):
         return f"❌ Fatal error while writing to the sheet: {e}"
 
 
+# Demo: a few bundled fictional resumes with different fits for the sample job, so visitors can try the
+# whole flow without downloading anything. Scores come from the AI and can vary slightly between runs.
+DEMO_SAMPLE_RESUMES = {
+    "ariel_lin.pdf": "Ariel Lin · 4 yrs Python backend, cloud deployment",
+    "kevin_huang.pdf": "Kevin Huang · 2 yrs Python backend",
+    "mei-ling_wu.pdf": "Mei-Ling Wu · data assistant moving into backend",
+}
+
+
+class BundledResume:
+    """A resume shipped with the app, with the two things the evaluation loop reads from an upload."""
+
+    def __init__(self, path):
+        self.path = path
+        self.name = os.path.basename(path)
+
+    def getbuffer(self):
+        with open(self.path, "rb") as f:
+            return f.read()
+
+
+@st.cache_data
+def sample_resume_preview(path):
+    """Picture of the first page, so visitors can see what the AI is reading."""
+    with pdfplumber.open(path) as pdf:
+        return pdf.pages[0].to_image(resolution=110).original
+
+
 class DemoMailer:
     """Stand-in for yagmail.SMTP in demo mode: previews the email instead of sending it."""
 
@@ -647,7 +676,8 @@ def hours_until_rejection(applied_at_str):
     except ValueError:
         return None
     remaining = (applied + timedelta(hours=REJECTION_DELAY_HOURS) - datetime.now()).total_seconds() / 3600
-    return max(0.0, round(remaining, 1))
+    # Whole hours, rounded up, so a candidate with 0.3 hours left shows 1 rather than 0
+    return max(0, math.ceil(remaining))
 
 
 # ==================== Streamlit UI ====================
@@ -801,79 +831,46 @@ with tab1:
                 if config.DEMO_MODE:
                     st.caption("Demo mode: saved profiles are kept only in your browser session.")
 
-    sample_dir = os.path.join(APP_DIR, "sample_resumes")
-    sample_files = sorted(f for f in os.listdir(sample_dir) if f.lower().endswith(".pdf")) if os.path.isdir(sample_dir) else []
-    with st.expander("🧪 Test these rules on the sample resumes (nothing is saved)"):
-        st.caption(
-            "Dry run: scores the chosen sample resumes with the JD and rules above, so you can see what a rule change does "
-            "before you use it. Nothing is written to the sheet and no emails are queued. Each resume is one AI call, "
-            "and results can vary by a few points between runs."
-        )
-        if not sample_files:
-            st.info("No sample resumes found.")
-        else:
-            test_choice = st.multiselect("Sample resumes to test with:", sample_files, default=sample_files, key="test_files")
-            if st.button("▶️ Run the test", key="run_rule_test"):
-                if not (st.session_state.current_jd.strip() and st.session_state.custom_rules.strip()):
-                    st.warning("⚠️ Fill in the JD and the scoring rules first.")
-                elif not analyze_rules(st.session_state.custom_rules)[1]:
-                    st.warning("⚠️ The scoring rules contain no point values (such as -15 or +5).")
-                elif not test_choice:
-                    st.info("Choose at least one sample resume.")
-                else:
-                    results = []
-                    progress = st.progress(0.0, text="Scoring sample resumes...")
-                    for i, sample_name in enumerate(test_choice):
-                        try:
-                            with pdfplumber.open(os.path.join(sample_dir, sample_name)) as pdf:
-                                sample_text = "".join([p.extract_text() or "" for p in pdf.pages])
-                            raw, ok = score_resume(
-                                sample_name,
-                                sample_text,
-                                st.session_state.current_jd,
-                                st.session_state.custom_rules,
-                                st.session_state.current_job_title or "Test job",
-                            )
-                            if not ok:
-                                raise ValueError(raw)
-                            scored = parse_scoring_response(raw)
-                            results.append({"file": sample_name, "ok": True, "data": scored})
-                        except Exception as test_error:  # noqa: BLE001 - show any failure per resume
-                            results.append({"file": sample_name, "ok": False, "error": str(test_error)})
-                        progress.progress((i + 1) / len(test_choice), text=f"Scored {i + 1} of {len(test_choice)}")
-                    progress.empty()
-                    st.session_state.rule_test_results = results
-
-            results = st.session_state.get("rule_test_results")
-            if results:
-                good = [r for r in results if r["ok"]]
-                st.markdown(
-                    f"**Result:** {sum(1 for r in good if r['data']['score'] >= SCORE_THRESHOLD)} of {len(good)} scored resumes "
-                    f"would reach the hiring manager ({SCORE_THRESHOLD}+), the rest would be auto-rejected."
-                )
-                table = [
-                    {
-                        "Resume": r["file"],
-                        "Candidate": r["data"].get("name", ""),
-                        "Score": r["data"]["score"],
-                        "Outcome": "→ Manager review" if r["data"]["score"] >= SCORE_THRESHOLD else "→ Auto-rejection",
-                    }
-                    for r in good
-                ]
-                if table:
-                    st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
-                    for r in good:
-                        st.markdown(f"- **{r['data'].get('name', r['file'])}**: {r['data']['score_calculation']}".replace("$", "\\$"))
-                for r in results:
-                    if not r["ok"]:
-                        st.error(f"{r['file']}: {r['error']}")
-
     st.divider()
-    uploaded_files = st.file_uploader("📥 Upload candidate resumes (multiple files allowed)", type=["pdf"], accept_multiple_files=True)
+    sample_dir = os.path.join(APP_DIR, "sample_resumes")
+    sample_choices = {name: label for name, label in DEMO_SAMPLE_RESUMES.items() if os.path.exists(os.path.join(sample_dir, name))}
+
+    SAMPLE_SOURCE = "🧪 Use sample resumes"
+    UPLOAD_SOURCE = "📥 Upload my own PDF resumes"
+    resume_source = UPLOAD_SOURCE
+    if config.DEMO_MODE and sample_choices:
+        st.markdown("### 📄 Resumes to evaluate")
+        resume_source = st.radio(
+            "Resumes to evaluate", [SAMPLE_SOURCE, UPLOAD_SOURCE], horizontal=True, key="resume_source",
+            label_visibility="collapsed",
+        )
+
+    if resume_source == SAMPLE_SOURCE:
+        st.caption(
+            "Fictional candidates with different fits for the sample Python Backend Engineer job, so you can see both "
+            "outcomes: some go to manager review and some are auto-rejected."
+        )
+        chosen_samples = st.pills(
+            "Sample resumes",
+            list(sample_choices),
+            selection_mode="multi",
+            default=list(sample_choices),
+            format_func=lambda name: sample_choices[name],
+            key="chosen_samples",
+            label_visibility="collapsed",
+        ) or []
+        for name in chosen_samples:
+            with st.expander(f"👀 Preview: {sample_choices[name]}"):
+                st.image(sample_resume_preview(os.path.join(sample_dir, name)), use_container_width=True)
+        uploaded_files = [BundledResume(os.path.join(sample_dir, name)) for name in chosen_samples]
+    else:
+        uploaded_files = st.file_uploader(
+            "📥 Upload candidate resumes (multiple files allowed)", type=["pdf"], accept_multiple_files=True
+        )
 
     if st.button("🚀 Start AI evaluation", type="primary", use_container_width=True):
         if not uploaded_files:
-            st.warning("⚠️ Upload at least one resume first.")
+            st.warning("⚠️ Choose or upload at least one resume first.")
         elif (
             not st.session_state.current_jd.strip()
             or not st.session_state.custom_rules.strip()
@@ -1094,10 +1091,10 @@ with tab2:
                             "Name": row[2],
                             "AI Score": int(row[4]) if row[4].isdigit() else 0,
                             "↩️ Move back to review": False,
-                            "Hours left": hours_until_rejection(row[7]),
                             "Resume": clean_resume_url(row[16]),
                             "AI Rationale": row[15],
                             "Score arithmetic": row[17],
+                            "Hours left": hours_until_rejection(row[7]),
                         }
                     )
                 rescue_count = sum(len(rows_for_job) for rows_for_job in rescue_by_job.values())
@@ -1120,12 +1117,12 @@ with tab2:
                             "↩️ Move back to review": st.column_config.CheckboxColumn(
                                 "↩️ Move back", default=False, width="small", help="Tick to send this candidate to the review board above"
                             ),
-                            "Hours left": st.column_config.NumberColumn(
-                                "⏳ Hours left", format="%.1f", width="small", help="Hours until the rejection email is sent"
-                            ),
                             "Resume": st.column_config.LinkColumn("Resume", display_text="📄 Open", width="small"),
                             "AI Rationale": st.column_config.TextColumn("AI rationale (click to expand)", width="medium"),
                             "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="medium"),
+                            "Hours left": st.column_config.NumberColumn(
+                                "⏳ Hours left", format="%d", width="small", help="Hours until the rejection email is sent"
+                            ),
                         }
                         rescue_tables = []
                         for job_title_in_sheet in sorted(rescue_by_job):
@@ -1182,8 +1179,6 @@ with tab3:
                     st.markdown(mail["body"], unsafe_allow_html=True)
                 else:
                     st.text(mail["body"])
-                if mail.get("booking_url"):
-                    st.link_button(f"📅 Open the booking page as {mail['candidate']}", mail["booking_url"])
                 st.divider()
             if st.button("Clear previews", key="clear_demo_emails"):
                 st.session_state.demo_emails = []
@@ -1356,8 +1351,6 @@ Sincerely,<br>The {COMPANY_NAME} Recruiting Team
 </span>
 """
                                     yag.send(to=email, subject=subject, contents=body)
-                                    if config.DEMO_MODE:
-                                        st.session_state.demo_emails[-1].update(booking_url=booking_url, candidate=name)
                                     sheet.update_cell(idx, 1, STATUS_INVITED_NO_REPLY)
                                     sheet.update_cell(idx, 9, current_time.strftime("%Y-%m-%d %H:%M"))
                                     trigger_count += 1
