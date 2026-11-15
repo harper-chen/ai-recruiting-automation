@@ -933,17 +933,12 @@ with tab1:
                         os.remove(temp_path)
 
                 status.update(label="✅ All resumes evaluated!", state="complete", expanded=False)
-            if outcome["review"]:
-                # Someone needs a decision: take the user straight to the review board, with a summary there.
+            if outcome["review"] or outcome["rejected"]:
+                # Every scored candidate lands on the review board: above the threshold for a decision,
+                # below it in the auto-rejected list where the manager can still move them back.
                 st.session_state.evaluation_summary = outcome
                 st.session_state.jump_to_tab = TAB_REVIEW
                 st.rerun()
-            elif outcome["rejected"] and not outcome["problems"]:
-                st.balloons()
-                st.info(
-                    f"Nobody scored {SCORE_THRESHOLD} or higher, so no one was sent to the Manager Review board. "
-                    "The candidates are in its \"Auto-rejected candidates\" list, where you can still move them back."
-                )
 
 # ---------------------------------------------------------
 # Tab 2: Manager review
@@ -952,9 +947,14 @@ with tab2:
     st.header("👨‍💼 Manager Review Board")
     summary = st.session_state.get("evaluation_summary")
     if summary:
-        parts = [f"**{summary['review']}** new candidate(s) are waiting for your decision below"]
+        parts = []
+        if summary["review"]:
+            parts.append(f"**{summary['review']}** new candidate(s) are waiting for your decision below")
         if summary["rejected"]:
-            parts.append(f"{summary['rejected']} scored below {SCORE_THRESHOLD} (see \"Auto-rejected candidates\")")
+            parts.append(
+                f"**{summary['rejected']}** scored below {SCORE_THRESHOLD}: they are in \"Auto-rejected candidates\" "
+                "at the bottom of this page, where you can read the AI's reasoning and move anyone back for review"
+            )
         if summary["problems"]:
             parts.append(f"{len(summary['problems'])} could not be processed")
         st.success("✅ Resume parsing finished: " + "; ".join(parts) + ".")
@@ -1078,7 +1078,8 @@ with tab2:
 
                 # ---- Safety net: let the manager look at AI-rejected candidates and move them back ----
                 st.divider()
-                rescue_data = []
+                # Same layout as the review board: one table per job, action column first, long AI text last.
+                rescue_by_job = {}
                 for idx, row in enumerate(all_rows[1:], start=2):
                     row = pad_row(row)
                     if not visible_to_me(row):
@@ -1087,47 +1088,65 @@ with tab2:
                         continue
                     if selected_job_tab2 != ALL_JOBS and row[1].strip() != selected_job_tab2:
                         continue
-                    rescue_data.append(
+                    rescue_by_job.setdefault(row[1].strip(), []).append(
                         {
                             "Sheet_Row": idx,
-                            "Job": row[1].strip(),
                             "Name": row[2],
                             "AI Score": int(row[4]) if row[4].isdigit() else 0,
-                            "Hours left": hours_until_rejection(row[7]),
                             "↩️ Move back to review": False,
-                            "AI Rationale": row[15],
+                            "Hours left": hours_until_rejection(row[7]),
                             "Resume": clean_resume_url(row[16]),
+                            "AI Rationale": row[15],
                             "Score arithmetic": row[17],
                         }
                     )
+                rescue_count = sum(len(rows_for_job) for rows_for_job in rescue_by_job.values())
 
                 with st.expander(
-                    f"🔎 Auto-rejected candidates (score below {SCORE_THRESHOLD}, rejection email not sent yet): {len(rescue_data)}"
+                    f"🔎 Auto-rejected candidates (score below {SCORE_THRESHOLD}, rejection email not sent yet): {rescue_count}",
+                    # Open it right after parsing produced new rejections, so they are not missed
+                    expanded=bool(summary and summary["rejected"]),
                 ):
                     st.caption(
                         f"The AI rejected these candidates. Their rejection email is sent {REJECTION_DELAY_HOURS} hours after they "
                         "applied, so until then you can read the AI's reasoning and move anyone back to the review board above. "
                         "Once the email is sent, the decision is final."
                     )
-                    if rescue_data:
-                        rdf = pd.DataFrame(rescue_data)
-                        redited = st.data_editor(
-                            rdf,
-                            key="rescue_editor",
-                            column_config={
-                                "Sheet_Row": None,
-                                "Resume": st.column_config.LinkColumn("Resume", display_text="Open resume"),
-                                "↩️ Move back to review": st.column_config.CheckboxColumn("↩️ Move back to review", default=False),
-                                "AI Rationale": st.column_config.TextColumn("AI Rationale (click to expand)", width="large"),
-                                "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="large"),
-                                "Hours left": st.column_config.NumberColumn("Hours until email", format="%.1f"),
-                            },
-                            disabled=["Job", "Name", "AI Score", "Hours left", "AI Rationale", "Resume", "Score arithmetic"],
-                            hide_index=True,
-                            use_container_width=True,
-                        )
+                    if rescue_by_job:
+                        rescue_columns = {
+                            "Sheet_Row": None,
+                            "Name": st.column_config.TextColumn("Name", width="medium"),
+                            "AI Score": st.column_config.NumberColumn("Score", width="small"),
+                            "↩️ Move back to review": st.column_config.CheckboxColumn(
+                                "↩️ Move back", default=False, width="small", help="Tick to send this candidate to the review board above"
+                            ),
+                            "Hours left": st.column_config.NumberColumn(
+                                "⏳ Hours left", format="%.1f", width="small", help="Hours until the rejection email is sent"
+                            ),
+                            "Resume": st.column_config.LinkColumn("Resume", display_text="📄 Open", width="small"),
+                            "AI Rationale": st.column_config.TextColumn("AI rationale (click to expand)", width="medium"),
+                            "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="medium"),
+                        }
+                        rescue_tables = []
+                        for job_title_in_sheet in sorted(rescue_by_job):
+                            rows_for_job = rescue_by_job[job_title_in_sheet]
+                            st.markdown(f"**💼 {job_title_in_sheet} · {len(rows_for_job)} candidate(s)**")
+                            rescue_tables.append(
+                                st.data_editor(
+                                    pd.DataFrame(rows_for_job),
+                                    key=f"rescue_{job_title_in_sheet}",
+                                    column_config=rescue_columns,
+                                    disabled=["Name", "AI Score", "Hours left", "Resume", "AI Rationale", "Score arithmetic"],
+                                    hide_index=True,
+                                    use_container_width=True,
+                                )
+                            )
                         if st.button("↩️ Move selected candidates back to manager review", key="rescue_btn"):
-                            chosen = redited.loc[redited["↩️ Move back to review"], "Sheet_Row"].tolist()
+                            chosen = [
+                                row_idx
+                                for redited in rescue_tables
+                                for row_idx in redited.loc[redited["↩️ Move back to review"], "Sheet_Row"].tolist()
+                            ]
                             if not chosen:
                                 st.info("Tick at least one candidate first.")
                             else:
@@ -1137,7 +1156,10 @@ with tab2:
                                         sheet.update_cell(int(row_idx), 1, STATUS_PENDING_REVIEW)
                                         sheet.update_cell(int(row_idx), 9, now_str)
                                 st.success(f"✅ Moved {len(chosen)} candidate(s) back to the review board.")
-                                st.session_state.pop("rescue_editor", None)  # drop stale cell edits before the rows change
+                                st.session_state.pop("evaluation_summary", None)
+                                for job_title_in_sheet in rescue_by_job:
+                                    # drop stale cell edits before the rows change
+                                    st.session_state.pop(f"rescue_{job_title_in_sheet}", None)
                                 time.sleep(1)
                                 st.rerun()
                     else:
