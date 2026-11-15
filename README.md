@@ -47,9 +47,11 @@ The goal is not to let AI decide who gets hired. It is to take the repetitive wo
 
 ![Email preview](docs/images/04-email-preview.png)
 
-**5. The candidate books the interview.** The link in the invitation opens a booking page that only offers times when every interviewer is free.
+**5. The candidate books the interview.** The link in the invitation opens a booking page that only offers times when every interviewer is free, then shows the confirmation with a video meeting link.
 
 ![Interview booking](docs/images/05-interview-booking.png)
+
+![Booking confirmation](docs/images/08-booking-confirmation.png)
 
 **6. The team sees where the funnel breaks**, with an optional AI-written summary of the numbers.
 
