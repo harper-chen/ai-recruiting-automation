@@ -815,11 +815,21 @@ if config.DEMO_MODE:
             st.caption("Then upload the file to the repo as `sample_jd/demo_ai_snapshot.json`.")
 TAB_LABELS = ["📥 AI Resume Parsing", "👨‍💼 Manager Review", "📬 Email Routing", "📊 Analytics Dashboard"]
 TAB_REVIEW = TAB_LABELS[1]
+TAB_EMAIL = TAB_LABELS[2]
+
+
+def go_to_tab(label):
+    """Button callback: callbacks run before the tabs are drawn, so the active tab can be changed here."""
+    st.session_state.main_tab = label
 
 
 def go_to_review_tab():
-    """Button callback: callbacks run before the tabs are drawn, so the active tab can be changed here."""
-    st.session_state.main_tab = TAB_REVIEW
+    go_to_tab(TAB_REVIEW)
+
+
+def go_to_email_tab():
+    st.session_state.pop("review_saved", None)
+    go_to_tab(TAB_EMAIL)
 
 
 def evaluation_summary_text(summary):
@@ -1186,13 +1196,20 @@ with tab2:
 
                             if update_count > 0:
                                 st.session_state.pop("evaluation_summary", None)
-                                st.success(f"✅ Synced {update_count} review decision(s). Go to the \"Email Routing\" tab to send notifications.")
-                                time.sleep(1)
+                                # Shown after the reload below, with a button to the next step
+                                st.session_state.review_saved = update_count
                                 st.rerun()
                             else:
                                 st.info("No changes to save.")
                 else:
                     st.info(f"👉 No resumes are waiting for manager review under \"{selected_job_tab2}\".")
+
+                if st.session_state.get("review_saved"):
+                    st.success(
+                        f"✅ Saved {st.session_state.review_saved} review decision(s). Next, send the interview invitations "
+                        "and rejection notes in Email Routing."
+                    )
+                    st.button("👉 Go to Email Routing", type="primary", on_click=go_to_email_tab, key="go_to_email")
 
                 # ---- Safety net: let the manager look at AI-rejected candidates and move them back ----
                 st.divider()
