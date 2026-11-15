@@ -654,6 +654,8 @@ def hours_until_rejection(applied_at_str):
 
 st.title("👔 HRIS Recruiting Command Center")
 if config.DEMO_MODE:
+    if config.BOOKING_APP_URL:
+        st.link_button("📅 See the candidate side: interview booking page", config.BOOKING_APP_URL)
     with st.expander("🛠️ Demo tools"):
         st.caption(
             f"Your private code is **{st.session_state.get('visitor_tag')}**. Only candidates tagged with it appear in "
@@ -1106,6 +1108,8 @@ with tab3:
                     st.markdown(mail["body"], unsafe_allow_html=True)
                 else:
                     st.text(mail["body"])
+                if mail.get("booking_url"):
+                    st.link_button(f"📅 Open the booking page as {mail['candidate']}", mail["booking_url"])
                 st.divider()
             if st.button("Clear previews", key="clear_demo_emails"):
                 st.session_state.demo_emails = []
@@ -1262,7 +1266,11 @@ with tab3:
                                 elif status == STATUS_PENDING_REVIEW and manager_approve_str == "TRUE":
                                     st.write(f"🚀 [Manager approved] Sending an interview invitation to {name}...")
                                     subject = f"[Interview Invitation] {COMPANY_NAME} - \"{job_title}\" team interview"
-                                    booking_url = f"{config.BOOKING_APP_URL}?{urlencode({'name': name, 'email': email})}"
+                                    booking_params = {"name": name, "email": email}
+                                    if config.DEMO_MODE:
+                                        # Lets the demo booking page list this visitor's own invited candidates
+                                        booking_params["v"] = st.session_state.get("visitor_tag", "")
+                                    booking_url = f"{config.BOOKING_APP_URL}?{urlencode(booking_params)}"
                                     body = f"""Dear {name},<br><br>
 Thank you for applying for the "{job_title}" position at {COMPANY_NAME.rstrip('.')}. After a careful review of your background, the hiring manager would like to invite you to the next stage: an online interview!<br><br>
 To fit around the technical managers' schedules, we built a self-service booking page. It shows all of their open time slots for the next three weeks, synced in real time.<br><br>
@@ -1274,6 +1282,8 @@ Sincerely,<br>The {COMPANY_NAME} Recruiting Team
 </span>
 """
                                     yag.send(to=email, subject=subject, contents=body)
+                                    if config.DEMO_MODE:
+                                        st.session_state.demo_emails[-1].update(booking_url=booking_url, candidate=name)
                                     sheet.update_cell(idx, 1, STATUS_INVITED_NO_REPLY)
                                     sheet.update_cell(idx, 9, current_time.strftime("%Y-%m-%d %H:%M"))
                                     trigger_count += 1

@@ -17,9 +17,10 @@ import yagmail
 from google.oauth2.service_account import Credentials
 
 import config
+import demo_support
 from calendar_busytime import fetch_and_save_calendar_data
 from calendar_sync import create_interview_event
-from config import COMPANY_NAME, STATUS_SCHEDULED, WEEKDAYS
+from config import COMPANY_NAME, STATUS_INVITED_NO_REPLY, STATUS_SCHEDULED, WEEKDAYS
 
 # ========== Page setup ==========
 st.set_page_config(page_title="Interview Scheduling", layout="wide")
@@ -40,8 +41,11 @@ st.title("👔 Interview Scheduling")
 if config.DEMO_MODE:
     st.warning(
         "🧪 **Demo mode.** The interviewers' calendars are simulated, no real Google Calendar event is created, "
-        "and no email is sent. Use a candidate name and email that exist in the demo sheet."
+        "and no email is sent. Pick an invited candidate below and book a slot as them."
     )
+    hr_app_url = config.get_setting("HR_APP_URL")
+    if hr_app_url:
+        st.caption(f"This is the candidate side. The recruiter side is the [HR Command Center]({hr_app_url}).")
 
 WORK_SESSIONS = [(9, 12), (13, 18)]  # working hours, 24h clock
 BUFFER = timedelta(minutes=15)
@@ -80,6 +84,32 @@ class DemoMailer:
 
     def send(self, to, subject, contents):
         st.session_state.demo_email_preview = (to, subject, contents)
+
+
+@st.cache_resource
+def open_sheet():
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    if "gcp_service_account" in st.secrets:
+        base_creds = Credentials.from_service_account_info(json.loads(st.secrets["gcp_service_account"]))
+    else:
+        base_creds = Credentials.from_service_account_file("creds.json")
+    return gspread.authorize(base_creds.with_scopes(scope)).open(config.SHEET_NAME).sheet1
+
+
+@st.cache_data(ttl=30)
+def demo_invited_candidates(visitor_tag):
+    """Demo only: candidates a visitor may book as. The built-in sample candidates who were invited, plus the
+    visitor's own candidates they invited in the HR demo (matched by the private code in the invite link)."""
+    candidates = []
+    for row in open_sheet().get_all_values()[1:]:
+        if len(row) < 4 or row[0].strip() != STATUS_INVITED_NO_REPLY:
+            continue
+        name, email = row[2].strip(), row[3].strip()
+        if demo_support.is_seed_email(email):
+            candidates.append({"name": name, "email": email, "label": f"{name} (sample candidate)"})
+        elif visitor_tag and demo_support.belongs_to_visitor(email, visitor_tag):
+            candidates.insert(0, {"name": name, "email": email, "label": f"{name} (your candidate from the HR demo)"})
+    return candidates
 
 
 def load_bookings():
@@ -200,6 +230,16 @@ if st.session_state.confirmed:
         with st.expander(f"📧 Demo preview (not sent) - {subject}", expanded=True):
             st.caption(f"To: {to}")
             st.text(contents)
+    if config.DEMO_MODE:
+        if st.session_state.get("simulated_only"):
+            st.caption(
+                "Demo: this was a sample candidate, so the booking was simulated and not saved. The candidate and "
+                "the slot stay available for the next visitor."
+            )
+        if st.button("🔁 Try another booking"):
+            for key in ("confirmed", "confirmed_info", "selected_slot", "meet_link", "demo_email_preview", "simulated_only"):
+                st.session_state.pop(key, None)
+            st.rerun()
 
 else:
     # ========== Slot selection ==========
@@ -208,15 +248,36 @@ else:
     default_name = st.query_params.get("name", "")
     default_email = st.query_params.get("email", "")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        applicant_name = st.text_input(
-            "Your full name (must match your résumé)", value=default_name, placeholder="e.g. Alex Taylor"
-        )
-    with col2:
-        applicant_email = st.text_input(
-            "Your email address (must match your résumé)", value=default_email, placeholder="e.g. name@example.com"
-        )
+    if config.DEMO_MODE:
+        # Demo: choose an invited candidate instead of typing, so visitors cannot get stuck on typos
+        # (visitor emails in the sheet carry a private code, e.g. ariel.lin+k3f9@example.com).
+        try:
+            demo_choices = demo_invited_candidates(st.query_params.get("v", ""))
+        except Exception as sheet_error:  # noqa: BLE001
+            st.error(f"❌ Could not load the demo candidates. Please try again later. ({sheet_error})")
+            st.stop()
+        if not demo_choices:
+            st.info("No invited candidates are available right now. Please try again in a moment.")
+            st.stop()
+        labels = [c["label"] for c in demo_choices]
+        preselect = next((i for i, c in enumerate(demo_choices) if c["email"] == default_email), 0)
+        picked = demo_choices[
+            labels.index(st.selectbox("📋 Book as this invited candidate:", labels, index=preselect, key="demo_candidate"))
+        ]
+        applicant_name, applicant_email = picked["name"], picked["email"]
+        col1, col2 = st.columns(2)
+        col1.text_input("Full name", value=applicant_name, disabled=True, key=f"name_{applicant_email}")
+        col2.text_input("Email address", value=applicant_email, disabled=True, key=f"email_{applicant_email}")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            applicant_name = st.text_input(
+                "Your full name (must match your résumé)", value=default_name, placeholder="e.g. Alex Taylor"
+            )
+        with col2:
+            applicant_email = st.text_input(
+                "Your email address (must match your résumé)", value=default_email, placeholder="e.g. name@example.com"
+            )
 
     st.divider()
     st.markdown("### 📅 Choose an interview slot that works for you")
@@ -267,17 +328,7 @@ else:
 
                     try:
                         print("[system log] Connecting to Google Sheets to verify the applicant...")
-                        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-
-                        if "gcp_service_account" in st.secrets:
-                            creds_info = json.loads(st.secrets["gcp_service_account"])
-                            base_creds = Credentials.from_service_account_info(creds_info)
-                        else:
-                            base_creds = Credentials.from_service_account_file("creds.json")
-
-                        scoped_creds = base_creds.with_scopes(scope)
-                        gs_client = gspread.authorize(scoped_creds)
-                        sheet = gs_client.open(config.SHEET_NAME).sheet1
+                        sheet = open_sheet()
 
                         all_rows = sheet.get_all_values()
                         target_row_index = None
@@ -310,13 +361,19 @@ else:
                                 if event_id:
                                     slot_key = str((date_str, time_range))
                                     st.session_state.booked_global[slot_key] = applicant_name
-                                    save_bookings(st.session_state.booked_global)
+                                    # Demo: a booking for a shared sample candidate is simulated only, so the
+                                    # candidate and the slot stay available for the next visitor.
+                                    simulated_only = config.DEMO_MODE and demo_support.is_seed_email(applicant_email)
+                                    st.session_state.simulated_only = simulated_only
+                                    if not simulated_only:
+                                        save_bookings(st.session_state.booked_global)
 
-                                    sheet.update_cell(target_row_index, 1, STATUS_SCHEDULED)
-                                    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                                    sheet.update_cell(target_row_index, 9, current_time_str)
-                                    sheet.update_cell(target_row_index, 10, f"{date_str} {start_time}")
-                                    sheet.update_cell(target_row_index, 11, google_meet_url)
+                                        sheet.update_cell(target_row_index, 1, STATUS_SCHEDULED)
+                                        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                                        sheet.update_cell(target_row_index, 9, current_time_str)
+                                        sheet.update_cell(target_row_index, 10, f"{date_str} {start_time}")
+                                        sheet.update_cell(target_row_index, 11, google_meet_url)
+                                        demo_invited_candidates.clear()
 
                                     st.info("✉️ Sending your confirmation email...")
 
