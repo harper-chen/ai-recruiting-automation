@@ -645,7 +645,8 @@ class BundledResume:
 def sample_resume_preview(path):
     """Picture of the first page, so visitors can see what the AI is reading."""
     with pdfplumber.open(path) as pdf:
-        return pdf.pages[0].to_image(resolution=110).original
+        # Rendered at about twice the display width, so it stays sharp on high-resolution (Retina) screens
+        return pdf.pages[0].to_image(resolution=200).original
 
 
 class DemoMailer:
@@ -861,7 +862,8 @@ with tab1:
         ) or []
         for name in chosen_samples:
             with st.expander(f"👀 Preview: {sample_choices[name]}"):
-                st.image(sample_resume_preview(os.path.join(sample_dir, name)), use_container_width=True)
+                # Fixed width: stretching the page across a wide screen made it blurry and too large to read
+                st.image(sample_resume_preview(os.path.join(sample_dir, name)), width=800)
         uploaded_files = [BundledResume(os.path.join(sample_dir, name)) for name in chosen_samples]
     else:
         uploaded_files = st.file_uploader(
