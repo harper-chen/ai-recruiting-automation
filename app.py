@@ -678,9 +678,13 @@ if config.DEMO_MODE:
                     st.success("Demo data reset: all candidates were removed and the sample candidates reloaded.")
                 except Exception as reset_error:  # noqa: BLE001
                     st.error(f"Reset failed: {reset_error}")
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["📥 AI Resume Parsing", "👨‍💼 Manager Review", "📬 Email Routing", "📊 Analytics Dashboard"]
-)
+TAB_LABELS = ["📥 AI Resume Parsing", "👨‍💼 Manager Review", "📬 Email Routing", "📊 Analytics Dashboard"]
+TAB_REVIEW = TAB_LABELS[1]
+# A widget's state cannot change after it is drawn, so a request to switch tabs (made after resume parsing)
+# is stored first and applied here, on the next run, before the tabs are created.
+if "jump_to_tab" in st.session_state:
+    st.session_state.main_tab = st.session_state.pop("jump_to_tab")
+tab1, tab2, tab3, tab4 = st.tabs(TAB_LABELS, key="main_tab", on_change="rerun")
 
 # ---------------------------------------------------------
 # Tab 1: AI resume parsing
@@ -879,6 +883,8 @@ with tab1:
         elif not analyze_rules(st.session_state.custom_rules)[1]:
             st.warning("⚠️ The scoring rules contain no point values (such as -15 or +5), so scores cannot be computed. Please fix the rules first.")
         else:
+            st.session_state.pop("evaluation_summary", None)
+            outcome = {"review": 0, "rejected": 0, "problems": []}
             with st.status("🤖 AI interviewer starting...", expanded=True) as status:
                 for file in uploaded_files:
                     st.write(f"Processing: {file.name}...")
@@ -909,27 +915,56 @@ with tab1:
 
                             if "❌" in msg or "🛑" in msg:
                                 st.warning(msg)
+                                outcome["problems"].append(msg)
                             else:
                                 st.success(msg)
+                                outcome["review" if data_dict.get("score", 0) >= SCORE_THRESHOLD else "rejected"] += 1
 
                         except ValueError as parse_error:
                             st.error(f"❌ The AI response for {file.name} was unusable and was NOT written: {parse_error}")
                             with st.expander("🔍 View the raw response"):
                                 st.code(result_json)
+                            outcome["problems"].append(f"{file.name}: the AI response was unusable and was NOT written")
                     else:
                         st.error(f"❌ Evaluation of {file.name} failed: {result_json}")
+                        outcome["problems"].append(f"{file.name}: {result_json}")
 
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
 
                 status.update(label="✅ All resumes evaluated!", state="complete", expanded=False)
-            st.balloons()
+            if outcome["review"]:
+                # Someone needs a decision: take the user straight to the review board, with a summary there.
+                st.session_state.evaluation_summary = outcome
+                st.session_state.jump_to_tab = TAB_REVIEW
+                st.rerun()
+            elif outcome["rejected"] and not outcome["problems"]:
+                st.balloons()
+                st.info(
+                    f"Nobody scored {SCORE_THRESHOLD} or higher, so no one was sent to the Manager Review board. "
+                    "The candidates are in its \"Auto-rejected candidates\" list, where you can still move them back."
+                )
 
 # ---------------------------------------------------------
 # Tab 2: Manager review
 # ---------------------------------------------------------
 with tab2:
     st.header("👨‍💼 Manager Review Board")
+    summary = st.session_state.get("evaluation_summary")
+    if summary:
+        parts = [f"**{summary['review']}** new candidate(s) are waiting for your decision below"]
+        if summary["rejected"]:
+            parts.append(f"{summary['rejected']} scored below {SCORE_THRESHOLD} (see \"Auto-rejected candidates\")")
+        if summary["problems"]:
+            parts.append(f"{len(summary['problems'])} could not be processed")
+        st.success("✅ Resume parsing finished: " + "; ".join(parts) + ".")
+        if summary["problems"]:
+            with st.expander("⚠️ Resumes that could not be processed"):
+                for problem in summary["problems"]:
+                    st.warning(problem)
+        if not summary.get("celebrated"):
+            st.balloons()
+            summary["celebrated"] = True
     st.info(
         f"💡 **How review works**\n\nResumes the AI scored {SCORE_THRESHOLD} or higher appear here for the hiring manager, "
         "plus any lower-scoring candidate you move back from the auto-rejected list below. "
@@ -958,7 +993,8 @@ with tab2:
                     if st.button("🔄 Reload list", key="reload_sheet_tab2"):
                         st.rerun()
 
-                review_data = []
+                # One table per job (the job is shown as a heading, not repeated in every row).
+                review_by_job = {}
                 for idx, row in enumerate(all_rows[1:], start=2):
                     row = pad_row(row)
                     if not visible_to_me(row):
@@ -969,53 +1005,69 @@ with tab2:
                     is_job_match = selected_job_tab2 == ALL_JOBS or selected_job_tab2 == job_title_in_sheet
 
                     if is_status_match and is_job_match:
-                        review_data.append(
+                        review_by_job.setdefault(job_title_in_sheet, []).append(
                             {
                                 "Sheet_Row": idx,
-                                "Job": job_title_in_sheet,
                                 "Name": row[2],
                                 "AI Score": int(row[4]) if row[4].isdigit() else 0,
-                                "AI Rationale": row[15],
-                                "Score arithmetic": row[17],
                                 "✅ Approve Interview": row[5].strip().upper() == "TRUE",
                                 "📝 Manager Comment": row[6],
                                 "Resume": clean_resume_url(row[16]),
+                                "AI Rationale": row[15],
+                                "Score arithmetic": row[17],
                             }
                         )
 
-                if review_data:
-                    df = pd.DataFrame(review_data)
-
-                    edited_df = st.data_editor(
-                        df,
-                        column_config={
-                            "Sheet_Row": None,
-                            "Resume": st.column_config.LinkColumn("Resume", display_text="Open resume"),
-                            "✅ Approve Interview": st.column_config.CheckboxColumn("✅ Approve Interview", default=False),
-                            "AI Rationale": st.column_config.TextColumn("AI Rationale (click to expand)", width="large"),
-                            "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="large"),
-                        },
-                        disabled=["Job", "Name", "AI Score", "AI Rationale", "Score arithmetic", "Resume"],
-                        hide_index=True,
-                        use_container_width=True,
-                    )
+                if review_by_job:
+                    # Decision columns come right after the name and score so they are visible without scrolling;
+                    # the long AI text columns go last and expand on click.
+                    review_columns = {
+                        "Sheet_Row": None,
+                        "Name": st.column_config.TextColumn("Name", width="medium"),
+                        "AI Score": st.column_config.NumberColumn("Score", width="small"),
+                        "✅ Approve Interview": st.column_config.CheckboxColumn(
+                            "✅ Invite", default=False, width="small", help="Tick to invite this candidate to interview"
+                        ),
+                        "📝 Manager Comment": st.column_config.TextColumn(
+                            "📝 Comment", width="medium", help="Required when you do not invite: the reason feeds the analytics"
+                        ),
+                        "Resume": st.column_config.LinkColumn("Resume", display_text="📄 Open", width="small"),
+                        "AI Rationale": st.column_config.TextColumn("AI rationale (click to expand)", width="medium"),
+                        "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="medium"),
+                    }
+                    review_tables = []
+                    for job_title_in_sheet in sorted(review_by_job):
+                        rows_for_job = review_by_job[job_title_in_sheet]
+                        st.markdown(f"#### 💼 {job_title_in_sheet} · {len(rows_for_job)} candidate(s)")
+                        df = pd.DataFrame(rows_for_job)
+                        edited_df = st.data_editor(
+                            df,
+                            key=f"review_{job_title_in_sheet}",
+                            column_config=review_columns,
+                            disabled=["Name", "AI Score", "AI Rationale", "Score arithmetic", "Resume"],
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+                        review_tables.append((df, edited_df))
 
                     if st.button("💾 Save review decisions and sync to the cloud", type="primary"):
                         with st.spinner("Syncing the manager's decisions to Google Sheets..."):
                             update_count = 0
-                            for i in range(len(df)):
-                                original_approved = df.iloc[i]["✅ Approve Interview"]
-                                edited_approved = edited_df.iloc[i]["✅ Approve Interview"]
-                                original_comment = df.iloc[i]["📝 Manager Comment"]
-                                edited_comment = edited_df.iloc[i]["📝 Manager Comment"]
+                            for df, edited_df in review_tables:
+                                for i in range(len(df)):
+                                    original_approved = df.iloc[i]["✅ Approve Interview"]
+                                    edited_approved = edited_df.iloc[i]["✅ Approve Interview"]
+                                    original_comment = df.iloc[i]["📝 Manager Comment"]
+                                    edited_comment = edited_df.iloc[i]["📝 Manager Comment"]
 
-                                if original_approved != edited_approved or original_comment != edited_comment:
-                                    row_idx = edited_df.iloc[i]["Sheet_Row"]
-                                    sheet.update_cell(row_idx, 6, str(edited_approved).upper())
-                                    sheet.update_cell(row_idx, 7, edited_comment)
-                                    update_count += 1
+                                    if original_approved != edited_approved or original_comment != edited_comment:
+                                        row_idx = int(edited_df.iloc[i]["Sheet_Row"])
+                                        sheet.update_cell(row_idx, 6, str(bool(edited_approved)).upper())
+                                        sheet.update_cell(row_idx, 7, edited_comment)
+                                        update_count += 1
 
                             if update_count > 0:
+                                st.session_state.pop("evaluation_summary", None)
                                 st.success(f"✅ Synced {update_count} review decision(s). Go to the \"Email Routing\" tab to send notifications.")
                                 time.sleep(1)
                                 st.rerun()
