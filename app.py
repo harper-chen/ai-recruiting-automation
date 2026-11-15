@@ -29,6 +29,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import yagmail
 from google import genai
+from google.genai import types as genai_types
 from google.oauth2.service_account import Credentials
 from plotly.subplots import make_subplots
 
@@ -117,7 +118,9 @@ def init_google_sheets():
 @st.cache_resource
 def init_ai_client():
     try:
-        return genai.Client(api_key=GEMINI_API_KEY)
+        # Pin the API version: JSON mode (response_mime_type) only works on v1beta, so do not rely on
+        # whatever default the installed SDK version happens to use.
+        return genai.Client(api_key=GEMINI_API_KEY, http_options=genai_types.HttpOptions(api_version="v1beta"))
     except Exception as e:
         st.error(f"❌ AI client initialization failed: {e}")
         return None
@@ -289,6 +292,17 @@ MODEL_NAME = "gemini-2.5-flash"
 MAX_AI_ATTEMPTS = 3
 
 
+PERMANENT_ERROR_MARKERS = ("400", "401", "403", "404", "INVALID_ARGUMENT", "PERMISSION_DENIED", "UNAUTHENTICATED", "NOT_FOUND")
+
+
+def is_permanent_error(error):
+    """True for client-side errors that will not go away on retry (unlike 500/503 server hiccups)."""
+    code = getattr(error, "code", None)
+    if isinstance(code, int):
+        return 400 <= code < 500 and code != 429
+    return any(marker in str(error) for marker in PERMANENT_ERROR_MARKERS)
+
+
 def generate_with_retry(prompt, json_mode=False):
     """Call Gemini, retrying transient failures (e.g. 503 UNAVAILABLE) with backoff.
 
@@ -309,6 +323,10 @@ def generate_with_retry(prompt, json_mode=False):
                     "The AI quota for this demo is used up (the free Gemini tier allows only a small number of "
                     "requests per day). Please try again later."
                 ) from e
+            if is_permanent_error(e):
+                # A bad request (wrong setting, bad key, unknown model) fails the same way every time,
+                # so retrying would only burn the daily free-tier quota.
+                raise
             if attempt < MAX_AI_ATTEMPTS - 1:
                 time.sleep(2 ** attempt)
     raise last_error
@@ -497,16 +515,18 @@ def _score_resume_uncached(file_name, resume_text, jd_text, rules_text, target_j
     }}
     """
     # The model occasionally returns malformed JSON, so a bad answer gets one fresh attempt.
+    # API errors are not retried here: generate_with_retry already retries the transient ones.
     last_error = "No response"
     for _ in range(2):
         try:
             response = generate_with_retry(prompt, json_mode=True)
+        except Exception as e:  # noqa: BLE001
+            return str(e), False
+        try:
             parse_scoring_response(response.text)  # validate only; callers parse again
             return response.text, True
         except Exception as e:  # noqa: BLE001
             last_error = str(e)
-            if "quota" in last_error:
-                break
     return last_error, False
 
 
