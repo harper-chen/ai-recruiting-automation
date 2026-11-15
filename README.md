@@ -1,55 +1,109 @@
 # AI Recruiting Automation System
 
-AI resume screening, hiring-manager review, candidate emails and self-service interview booking, with a recruiting analytics dashboard. Built with Python, Streamlit, Gemini and Google Sheets.
+An end-to-end recruiting workflow that screens resumes with AI, keeps a hiring manager in charge of every decision, lets candidates book their own interviews, and shows where the hiring funnel loses people.
 
 **Live demo:** [HR Command Center](https://harper-hr-dashboard.streamlit.app/) · [Interview Booking](https://harper-interview-booking.streamlit.app/)
+No sign-up and no files needed: sample resumes and candidates are built in.
 
 > The demo apps sleep when idle. If you see a "gone to sleep" page, press the wake-up button and wait about 30 seconds.
-## Screenshots
 
-**1. Score resumes against editable rules** (the code does the arithmetic)
+## The problem
 
-![Resume parsing](docs/images/01-resume-parsing.png)
+Before this project I worked in recruiting, first at a headhunting agency and then as a Talent Acquisition intern coordinating 40+ candidates a week. Three problems kept coming back:
 
-**2. Hiring manager review**, with the AI's reasoning and a rescue path for auto-rejected candidates
+1. **First-round screening is slow and inconsistent.** Every resume is read by hand, and two people screening for the same role do not always apply the same standard.
+2. **Scheduling interviews is mostly back-and-forth.** Finding one slot that works for a candidate and several interviewers can take a chain of emails and calls for a single interview.
+3. **Nobody can see where the funnel breaks.** Candidate records exist, but there is no simple view of where people drop out, whether the salary budget is realistic, or which requirements screen out most applicants.
+
+## What this project changes
+
+| | Before | With this system |
+|---|---|---|
+| **Screening** | Each recruiter reads every resume and judges it their own way | Every resume is scored against the same written rules; the AI shows which rules applied and the code adds up the points |
+| **Decisions** | Rejections can happen without a second look | A hiring manager approves every interview, and can rescue anyone the AI rejected before the rejection email goes out |
+| **Scheduling** | Emails back and forth to find a time | The candidate opens one link and picks a slot that is free for all interviewers; a video meeting is created automatically |
+| **Candidate updates** | Candidates often wait without hearing back | Invitations, rejections and confirmations are sent based on each candidate's status |
+| **Funnel visibility** | Data scattered across inboxes and spreadsheets | One dashboard shows drop-off by stage, rejection reasons, score vs. expected salary and which skills cost more |
+
+The goal is not to let AI decide who gets hired. It is to take the repetitive work off recruiters so their time goes to the judgment calls, and to give the team data to improve the process.
+
+## How it works
+
+**1. The recruiter sets the screening rules.** Upload or paste a job description, and the AI drafts point-based scoring rules from it (for example, a deduction for a missing required skill). The recruiter reads, edits and saves them, so every resume is judged by the same written standard.
+
+![Screening rules](docs/images/00-screening-rules.png)
+
+**2. Resumes are scored against those rules.** Upload a batch of PDF resumes (the demo also has built-in samples). The AI reports which rules applied, and the code adds up the score.
+
+![Resume scoring](docs/images/01-resume-parsing.png)
+
+**3. The hiring manager decides.** Shortlisted candidates appear with the AI's reasoning and score arithmetic. Lower-scoring candidates wait in a separate list where the manager can move anyone back for review.
 
 ![Manager review](docs/images/02-manager-review.png)
 
-**3. Email routing** driven by the status column
+**4. Emails follow each candidate's status.** One click sends invitations and rejection notes (in the demo they are shown on screen, never sent).
 
 ![Email routing](docs/images/03-email-routing.png)
 
 ![Email preview](docs/images/04-email-preview.png)
 
-**4. Candidate self-service interview booking**
+**5. The candidate books the interview.** The link in the invitation opens a booking page that only offers times when every interviewer is free.
 
 ![Interview booking](docs/images/05-interview-booking.png)
 
-**5. Recruiting analytics**
+**6. The team sees where the funnel breaks**, with an optional AI-written summary of the numbers.
 
 ![Analytics dashboard](docs/images/06-analytics-dashboard.png)
 
-**6. AI-written insights**, built from numbers the app computes
-
 ![AI hiring insights](docs/images/07-ai-insights.png)
-> Class project built with fictional data. "Acme Technology Ltd." is an invented company, and every sample resume in `sample_resumes/` describes an invented person.
 
-## What it does
+## Design choices
 
-- **Scores resumes with AI.** Upload a job description, let the AI draft scoring rules, then score a batch of PDF resumes against them. Every candidate starts at 70 points; the AI lists which rules applied and by how many points, and the code does the arithmetic.
-- **Lets you test the rules first.** A "Test these rules" dry run scores sample resumes without saving anything, and basic checks warn about rules with no point values or rules too lenient to ever reject anyone.
-- **Routes by score.** 60 or above goes to a hiring manager. Below 60 is queued for an automatic rejection email after 48 hours.
-- **Keeps a human in the loop.** Managers approve or decline shortlisted candidates, and can open the auto-rejected list, read the AI's rationale and point-by-point score arithmetic in the table, and move anyone back to review before the rejection email goes out.
-- **Sends the emails.** Interview invitations, rejection notes and booking confirmations are driven by a status column in Google Sheets.
-- **Books the interview.** Candidates pick from the interviewers' shared free time, a Google Meet room is created, and double booking is prevented.
-- **Shows where candidates drop out.** A dashboard covers the funnel, conversion by experience, rejection reasons, score vs. salary expectation and skill premium.
-- **Explains the numbers.** One click turns the current dashboard view into a short written report: findings, recommendations (for example a salary range or a requirement that fires for most applicants) and caveats. The app computes every statistic; the AI only explains them and never sees names, emails or resumes.
+Each of these comes from a risk I wanted the system to avoid:
 
-## Why it exists
+- **People make the decisions, not the AI.** The AI only screens. No one is invited without a manager's approval, low scorers can be rescued for 48 hours before any rejection email, and a manager who declines someone must write the reason, which then feeds the analytics.
+- **The AI never does the math.** The model only reports which rules applied and their points; the code computes the score and decides the next step. A model mistake cannot silently change a candidate's outcome, and an unreadable answer is rejected instead of saved.
+- **Rules are written down and editable.** Recruiters can read and change every rule, and the app warns about rules with no point values or rules too lenient to ever reject anyone.
+- **The AI report never sees personal data.** The app computes every statistic first; the AI only explains aggregated numbers, never names, emails or resumes.
 
-Hiring funnels are a core People Analytics subject: where candidates drop out, whether salary expectations match the budget, and which skills carry a price premium. This project puts salary budget and required skills into the AI scoring rubric, timestamps each stage, and turns the Google Sheet into a funnel dashboard so bottlenecks are visible (for example, strong candidates lost to a salary range set too low).
+## Try the demo
 
-## Two apps, one workflow
+1. Open the **[HR Command Center](https://harper-hr-dashboard.streamlit.app/)**. A sample "Python Backend Engineer" job is already loaded: look over its job description and scoring rules, or press the AI button to draft new rules from the job description.
+2. Under **Resumes to evaluate**, keep the three sample resumes selected (preview any of them), then press **Start AI evaluation**. The app moves to **Manager Review** when scoring is done.
+3. Approve one candidate, decline another with a comment, and open **Auto-rejected candidates** to read the AI's reasoning or move someone back.
+4. In **Email Routing**, run the state machine to preview the emails. Tick "skip the wait" to include the automatic rejections.
+5. Click the link in the invitation preview to book an interview as that candidate. You can also open the **[Interview Booking](https://harper-interview-booking.streamlit.app/)** page directly and pick one of the built-in invited candidates.
+6. In **Analytics Dashboard**, sync the data, explore the charts and press **Generate insights** for the written report.
+
+You can also upload your own PDF resumes. In demo mode no email is sent and no calendar event is created. Your candidates are visible only to you (a private code is kept in the page URL) and are deleted after 24 hours.
+
+## Limitations
+
+This is a class project, not a production hiring system.
+
+- **AI scores are a screening aid, not a decision.** They have not been validated for accuracy or tested for bias. A real deployment would need a bias audit and mandatory human review.
+- **Scores can vary by a few points between runs**, so candidates near the threshold may land on either side of it.
+- **Rule quality matters.** Overly strict rules (such as requiring specific degree majors) can screen out capable candidates, so a recruiter should always review them.
+- **The public demo is shared.** All visitors use one Google Sheet and one free-tier Gemini key, so new AI requests may hit a "quota used up" message at busy times. The built-in sample resumes with the default rules keep working, because their AI results are saved in the repo. The demo's analytics use generated sample data, so its findings are illustrative.
+- **Built for a demo, not for scale.** Google Sheets is the database, two simultaneous bookings can race, the rejection-reason chart uses keyword matching, and business hours and timezone (Taipei, GMT+8) are fixed in the code.
+
+## Team
+
+Built by a four-person student team for a "Programming for Business Computing" course.
+
+| Name | Role |
+|---|---|
+| Te-Chi Chen (team lead) | Workflow design, scheduling workflow redesign (immediate booking), HR recruiting command center, team code integration |
+| Qi Ding | Interview scheduling system web app design |
+| Yi-Xuan Yang | Interviewer availability (free-slot) algorithm design |
+| Rui-Yun Zhuang | Plotly chart design |
+
+## Technical details
+
+Built with Python, Streamlit, the Gemini API, Google Sheets, Google Calendar and Gmail.
+
+<details>
+<summary>Two apps, one workflow</summary>
 
 | App | File | Audience | What it does |
 |---|---|---|---|
@@ -58,7 +112,10 @@ Hiring funnels are a core People Analytics subject: where candidates drop out, w
 
 Google Sheets is the shared state store between them: each candidate is one row, and the `status` column drives the pipeline.
 
-## How it works
+</details>
+
+<details>
+<summary>Status machine</summary>
 
 ```text
 New resume (PDF) -> Gemini lists applied rules + points -> code computes 70 + sum -> score routing
@@ -72,24 +129,17 @@ New resume (PDF) -> Gemini lists applied rules + points -> code computes 70 + su
 
 If a hired candidate declines or takes another offer, HR can set `Offer Declined` by hand.
 
-- **Status drives everything.** Routing and emails depend on the `status` value, not on the score, so a candidate the manager moves back from the auto-rejected list follows the manager's decision.
-- **Score and status are computed by code, not by the model.** The model only reports which rules applied and their signed points (`adjustments`). `scoring.py` sums them onto the baseline, clamps to 0-100 and stores the arithmetic in `score_calculation`; `app.py` derives the status from the score. A model arithmetic slip or a malformed response cannot corrupt the state machine, and an unusable response is rejected instead of written.
+- **Status drives everything.** Routing and emails depend on `status`, not on the score, so a candidate the manager moves back follows the manager's decision.
+- **Score and status are computed by code.** `scoring.py` sums the model's `adjustments` onto the baseline, clamps to 0-100 and stores the arithmetic in `score_calculation`; `app.py` derives the status from the score.
 - **Duplicate guard.** A (job, email) pair already in the sheet is not written twice.
 - **Interview slots.** Free time is the complement of all interviewers' busy blocks over the next 21 days, on weekdays within 09:00-12:00 and 13:00-18:00, shown on the hour and half hour.
-- **Scoring scale lives in one place.** The baseline, threshold, delay and suggested point ranges are constants in `config.py`, and both the UI and the AI prompts read them.
+- **One source for the scoring scale.** The baseline, threshold, delay and suggested point ranges are constants in `config.py`, read by both the UI and the AI prompts.
+- **Error handling.** AI calls retry temporary errors (such as `503 UNAVAILABLE`) up to three times with backoff, but stop immediately on permanent errors and quota limits so they do not waste the free quota.
 
-## Try the demo
+</details>
 
-1. Open the **HR Command Center**. A sample "Python Backend Engineer" job is already loaded.
-2. In **AI Resume Parsing**, open *Test these rules on the sample resumes* to dry-run the rules (nothing is saved), then upload the PDFs from `sample_resumes/` and press *Start AI evaluation*.
-3. In **Manager Review**, click a cell in the *AI Rationale* or *Score arithmetic* column to read it in full, approve a candidate, decline another with a comment, and open the auto-rejected list to move someone back.
-4. In **Email Routing**, run the state machine. Emails are previewed on screen (never sent). Tick "skip the wait" to include the automatic rejections.
-5. Click the booking link in the invitation preview, choose a slot and confirm.
-6. In **Analytics Dashboard**, sync, explore the charts, then press *Generate insights* for the written report (the "numbers the AI was given" panel shows exactly what it saw).
-
-In demo mode no email is sent, no calendar event is created, and uploaded files are not stored. Saved job profiles live only in your own browser session. Candidates you upload are tagged with a private code (for example `ariel.lin+k3f9@example.com`, kept in the page URL), so many visitors can score the same sample resumes at the same time and each sees only their own in Manager Review and Email Routing. Visitor rows are deleted after 24 hours. The Analytics tab also shows about 40 fictional sample candidates, and a *Demo tools* panel lets a visitor clear their own candidates (the owner can reset the whole demo with an `ADMIN_KEY`). Identical resume + rules combinations reuse the earlier AI answer, which keeps the free Gemini quota for visitors who change something.
-
-## Run it yourself
+<details>
+<summary>Run it yourself</summary>
 
 1. Follow [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) to create the Google Sheet, service account, OAuth token, Gmail app password and Gemini key. Set `DEMO_MODE = true` to skip the Gmail and Calendar parts.
 2. Copy `secrets.example.toml` to `.streamlit/secrets.toml` and fill it in.
@@ -101,32 +151,9 @@ streamlit run app.py                                  # HR Command Center, port 
 streamlit run streamlit_app.py --server.port 8502     # candidate booking page
 ```
 
-## Limitations
+Unit tests cover the scoring arithmetic, rule checks, demo helpers and the analytics summary (`python -m unittest`). The Streamlit UI, Sheets, Calendar and email paths are tested by hand.
 
-This is a class project, not a production hiring system.
-
-- **AI scoring is a screening aid, not a decision.** Scores come from a language model reading resumes and have not been validated for accuracy or tested for bias. Managers can review and rescue auto-rejected candidates, but only until the rejection email is sent; a production system should add a mandatory human review and be audited for adverse impact.
-- **Scores are not perfectly repeatable.** Scoring the same resume twice can differ by a few points, so candidates near the threshold may land on either side of it.
-- **Rule quality matters.** The AI drafts the scoring rules, but a recruiter must read and tune them. Strict rules (such as requiring specific degree majors) can screen out capable candidates.
-- **The public demo is shared infrastructure.** All visitors use one Google Sheet and one free-tier Gemini key (a small daily request limit), so the demo can show a "quota used up" message at busy times. Its analytics include other visitors' recent uploads.
-- **The AI report is a discussion starter.** It only reads aggregated statistics, but small samples and correlation-not-causation apply, and the sample data in the demo was generated to show these charts, so its "findings" are illustrative.
-- **Retries are minimal.** AI calls retry up to three times with backoff on errors such as `503 UNAVAILABLE`; there is no queueing or rate limiting.
-- **Concurrency.** Google Sheets is the database and `bookings.json` is a local file, so two simultaneous bookings can race. Slot protection is best-effort, and the file is lost when a free cloud host restarts.
-- **Positional columns.** Reading the sheet by column index is brittle if columns are reordered.
-- **The rejection-reason chart uses keyword matching** on the AI's free-text rationale. Treat it as indicative.
-- **Fixed schedule and timezone.** Business hours, 1-hour interviews and Taipei time (GMT+8) are constants in the code.
-- **Light test coverage.** Unit tests cover the scoring arithmetic, rule checks, demo helpers and the analytics summary (`python -m unittest`); the Streamlit UI, Sheets, Calendar and email paths are tested by hand only.
-
-## Team
-
-Built by a student team for a "Programming for Business Computing" course.
-
-| Name | Role |
-|---|---|
-| Te-Chi Chen (team lead) | Workflow design, scheduling workflow redesign (immediate booking), HR recruiting command center, team code integration |
-| Qi Ding | Interview scheduling system web app design |
-| Yi-Xuan Yang | Interviewer availability (free-slot) algorithm design |
-| Rui-Yun Zhuang | Plotly chart design |
+</details>
 
 <details>
 <summary>Google Sheet contract (for self-hosting)</summary>
@@ -170,6 +197,8 @@ The `status` values are defined in `config.py` and must match the sheet exactly 
 ```
 
 </details>
+
+> Built with fictional data. "Acme Technology Ltd." is an invented company, and every sample resume describes an invented person.
 
 ## License
 

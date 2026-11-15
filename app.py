@@ -305,6 +305,20 @@ def is_permanent_error(error):
     return any(marker in str(error) for marker in PERMANENT_ERROR_MARKERS)
 
 
+def quota_used_up_message():
+    """Shown when the free Gemini quota runs out, pointing visitors to what still works."""
+    message = (
+        "Today's free AI quota for this demo is used up (the free Gemini tier allows only a small number of "
+        "requests per day), so new AI requests will work again tomorrow."
+    )
+    if config.DEMO_MODE and demo_snapshot():
+        message += (
+            " The built-in sample resumes with the default scoring rules still work at any time, because their "
+            "results are saved."
+        )
+    return message + f" You can also see every step in the screenshots on GitHub: {config.REPO_URL}#how-it-works"
+
+
 def generate_with_retry(prompt, json_mode=False):
     """Call Gemini, retrying transient failures (e.g. 503 UNAVAILABLE) with backoff.
 
@@ -321,10 +335,7 @@ def generate_with_retry(prompt, json_mode=False):
             last_error = e
             if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
                 # A quota limit will not clear within seconds, so retrying only wastes time.
-                raise RuntimeError(
-                    "The AI quota for this demo is used up (the free Gemini tier allows only a small number of "
-                    "requests per day). Please try again later."
-                ) from e
+                raise RuntimeError(quota_used_up_message()) from e
             if is_permanent_error(e):
                 # A bad request (wrong setting, bad key, unknown model) fails the same way every time,
                 # so retrying would only burn the daily free-tier quota.
@@ -334,8 +345,8 @@ def generate_with_retry(prompt, json_mode=False):
     raise last_error
 
 
-def generate_rules_from_jd(jd_text):
-    prompt = f"""
+def build_rules_prompt(jd_text):
+    return f"""
     You are a senior technical recruiter. Based on the [Job Description (JD)] below, write 7 to 10 of the
     most important "resume scoring rules" (point deductions and bonuses).
 
@@ -364,8 +375,18 @@ def generate_rules_from_jd(jd_text):
     [JOB DESCRIPTION (JD)]:
     {jd_text}
     """
+
+
+def rules_cache_key(prompt):
+    return "rules:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+def generate_rules_from_jd(jd_text):
+    prompt = build_rules_prompt(jd_text)
     cache = demo_ai_cache() if config.DEMO_MODE else None
-    cache_key = "rules:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    cache_key = rules_cache_key(prompt)
+    if config.DEMO_MODE and cache_key in demo_snapshot():
+        return demo_snapshot()[cache_key]
     if cache is not None and cache_key in cache:
         return cache[cache_key]["raw"]
     try:
@@ -541,6 +562,23 @@ def demo_ai_cache():
 DEMO_CACHE_HOURS = 24
 DEMO_CACHE_MAX_ENTRIES = 500
 TIME_STAMP = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+DEMO_SNAPSHOT_FILE = os.path.join(APP_DIR, "sample_jd", "demo_ai_snapshot.json")
+
+
+@st.cache_resource
+def demo_snapshot():
+    """Demo only: saved AI answers for the bundled sample resumes scored with the sample job's default JD and rules
+    (created with the owner's export button). Unlike the in-memory cache they survive restarts and never expire,
+    so the default demo path keeps working when the free AI quota is used up."""
+    try:
+        with open(DEMO_SNAPSHOT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def scoring_cache_key(resume_text, jd_text, rules_text, target_job_title):
+    return hashlib.sha256("\x1f".join([MODEL_NAME, resume_text, jd_text, rules_text, target_job_title]).encode("utf-8")).hexdigest()
 
 
 def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
@@ -549,9 +587,13 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
     if not config.DEMO_MODE:
         return _score_resume_uncached(file_name, resume_text, jd_text, rules_text, target_job_title)
 
-    key = hashlib.sha256("\x1f".join([MODEL_NAME, resume_text, jd_text, rules_text, target_job_title]).encode("utf-8")).hexdigest()
+    key = scoring_cache_key(resume_text, jd_text, rules_text, target_job_title)
     cache = demo_ai_cache()
     now = datetime.now()
+    saved = demo_snapshot().get(key)
+    if saved:
+        # Saved answer for a sample resume: no AI call needed. Keep the application time current.
+        return TIME_STAMP.sub(now.strftime("%Y-%m-%d %H:%M"), saved), True
     hit = cache.get(key)
     if hit and (now - hit["at"]) < timedelta(hours=DEMO_CACHE_HOURS):
         # Keep the application time current: swap the stored timestamp for the present one
@@ -563,6 +605,39 @@ def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
             cache.pop(next(iter(cache)))
         cache[key] = {"raw": raw, "at": now}
     return raw, ok
+
+
+@st.cache_data
+def pdf_text(path):
+    with pdfplumber.open(path) as pdf:
+        return "".join([p.extract_text() or "" for p in pdf.pages])
+
+
+def build_demo_snapshot():
+    """Owner only: gather the AI answers for the bundled sample resumes scored with the sample job's default JD and
+    rules, plus the AI-drafted rules for that JD. Nothing else is exported, so no visitor upload can end up in it.
+    Returns (snapshot, names of sample resumes that have no answer yet)."""
+    profile = sample_profiles()[SAMPLE_PROFILE_NAME]
+    sample_dir = os.path.join(APP_DIR, "sample_resumes")
+    names = [name for name in DEMO_SAMPLE_RESUMES if os.path.exists(os.path.join(sample_dir, name))]
+    cache, saved = demo_ai_cache(), demo_snapshot()
+
+    def answer(key):
+        if key in saved:
+            return saved[key]
+        return cache[key]["raw"] if key in cache else None
+
+    snapshot, missing = {}, []
+    for name in names:
+        key = scoring_cache_key(pdf_text(os.path.join(sample_dir, name)), profile["jd"], profile["rules"], SAMPLE_PROFILE_NAME)
+        if answer(key):
+            snapshot[key] = answer(key)
+        else:
+            missing.append(name)
+    rules_key = rules_cache_key(build_rules_prompt(profile["jd"]))
+    if answer(rules_key):
+        snapshot[rules_key] = answer(rules_key)
+    return snapshot, missing
 
 
 def parse_scoring_response(raw_text):
@@ -720,12 +795,47 @@ if config.DEMO_MODE:
                     st.success("Demo data reset: all candidates were removed and the sample candidates reloaded.")
                 except Exception as reset_error:  # noqa: BLE001
                     st.error(f"Reset failed: {reset_error}")
+            st.divider()
+            st.caption(
+                "Owner only: save the AI answers for the sample resumes (default job and rules), so the default demo "
+                "keeps working when the free AI quota is used up."
+            )
+            snapshot, missing = build_demo_snapshot()
+            if missing:
+                st.caption(
+                    "Not saved yet: " + ", ".join(missing) + ". Score them with the default rules first, then come back."
+                )
+            st.download_button(
+                f"💾 Export AI snapshot ({len(snapshot)} saved answer(s))",
+                data=json.dumps(snapshot, ensure_ascii=False, indent=2),
+                file_name="demo_ai_snapshot.json",
+                mime="application/json",
+                disabled=not snapshot,
+            )
+            st.caption("Then upload the file to the repo as `sample_jd/demo_ai_snapshot.json`.")
 TAB_LABELS = ["📥 AI Resume Parsing", "👨‍💼 Manager Review", "📬 Email Routing", "📊 Analytics Dashboard"]
 TAB_REVIEW = TAB_LABELS[1]
-# A widget's state cannot change after it is drawn, so a request to switch tabs (made after resume parsing)
-# is stored first and applied here, on the next run, before the tabs are created.
-if "jump_to_tab" in st.session_state:
-    st.session_state.main_tab = st.session_state.pop("jump_to_tab")
+
+
+def go_to_review_tab():
+    """Button callback: callbacks run before the tabs are drawn, so the active tab can be changed here."""
+    st.session_state.main_tab = TAB_REVIEW
+
+
+def evaluation_summary_text(summary):
+    parts = []
+    if summary["review"]:
+        parts.append(f"**{summary['review']}** candidate(s) scored {SCORE_THRESHOLD}+ and are waiting for a manager's decision")
+    if summary["rejected"]:
+        parts.append(
+            f"**{summary['rejected']}** scored below {SCORE_THRESHOLD} and are in the \"Auto-rejected candidates\" list, "
+            "where the manager can read the AI's reasoning and move anyone back for review"
+        )
+    if summary["problems"]:
+        parts.append(f"{len(summary['problems'])} could not be processed")
+    return "✅ Resume parsing finished: " + "; ".join(parts) + "."
+
+
 tab1, tab2, tab3, tab4 = st.tabs(TAB_LABELS, key="main_tab", on_change="rerun")
 
 # ---------------------------------------------------------
@@ -942,13 +1052,24 @@ with tab1:
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
 
-                status.update(label="✅ All resumes evaluated!", state="complete", expanded=False)
+                # Keep the log open when something failed, so the error messages stay visible
+                status.update(
+                    label="✅ All resumes evaluated!" if not outcome["problems"] else "⚠️ Evaluation finished with problems",
+                    state="complete" if not outcome["problems"] else "error",
+                    expanded=bool(outcome["problems"]),
+                )
+            st.session_state.evaluation_summary = outcome
             if outcome["review"] or outcome["rejected"]:
-                # Every scored candidate lands on the review board: above the threshold for a decision,
-                # below it in the auto-rejected list where the manager can still move them back.
-                st.session_state.evaluation_summary = outcome
-                st.session_state.jump_to_tab = TAB_REVIEW
-                st.rerun()
+                st.balloons()
+
+    # Stays visible after the run, so the user decides when to move on to the review board
+    summary = st.session_state.get("evaluation_summary")
+    if summary:
+        if summary["review"] or summary["rejected"]:
+            st.success(evaluation_summary_text(summary))
+            st.button("👉 Go to Manager Review", type="primary", on_click=go_to_review_tab, key="go_to_review")
+        else:
+            st.warning("⚠️ No resume could be processed. See the messages above.")
 
 # ---------------------------------------------------------
 # Tab 2: Manager review
@@ -956,25 +1077,12 @@ with tab1:
 with tab2:
     st.header("👨‍💼 Manager Review Board")
     summary = st.session_state.get("evaluation_summary")
-    if summary:
-        parts = []
-        if summary["review"]:
-            parts.append(f"**{summary['review']}** new candidate(s) are waiting for your decision below")
-        if summary["rejected"]:
-            parts.append(
-                f"**{summary['rejected']}** scored below {SCORE_THRESHOLD}: they are in \"Auto-rejected candidates\" "
-                "at the bottom of this page, where you can read the AI's reasoning and move anyone back for review"
-            )
-        if summary["problems"]:
-            parts.append(f"{len(summary['problems'])} could not be processed")
-        st.success("✅ Resume parsing finished: " + "; ".join(parts) + ".")
+    if summary and (summary["review"] or summary["rejected"]):
+        st.success(evaluation_summary_text(summary))
         if summary["problems"]:
             with st.expander("⚠️ Resumes that could not be processed"):
                 for problem in summary["problems"]:
                     st.warning(problem)
-        if not summary.get("celebrated"):
-            st.balloons()
-            summary["celebrated"] = True
     st.info(
         f"💡 **How review works**\n\nResumes the AI scored {SCORE_THRESHOLD} or higher appear here for the hiring manager, "
         "plus any lower-scoring candidate you move back from the auto-rejected list below. "
