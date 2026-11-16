@@ -565,11 +565,21 @@ TIME_STAMP = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 DEMO_SNAPSHOT_FILE = os.path.join(APP_DIR, "sample_jd", "demo_ai_snapshot.json")
 
 
-@st.cache_resource
 def demo_snapshot():
     """Demo only: saved AI answers for the bundled sample resumes scored with the sample job's default JD and rules
     (created with the owner's export button). Unlike the in-memory cache they survive restarts and never expire,
     so the default demo path keeps working when the free AI quota is used up."""
+    try:
+        modified = os.path.getmtime(DEMO_SNAPSHOT_FILE)
+    except OSError:
+        return {}
+    # Keyed by the file's modification time: a snapshot added or replaced later (which does not restart the app,
+    # because only .py changes do) is picked up on the next run instead of the old answer staying cached.
+    return _load_demo_snapshot(modified)
+
+
+@st.cache_resource
+def _load_demo_snapshot(modified):
     try:
         with open(DEMO_SNAPSHOT_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -1028,7 +1038,16 @@ with tab1:
                     with pdfplumber.open(temp_path) as pdf:
                         full_text = "".join([p.extract_text() or "" for p in pdf.pages])
 
-                    st.write(f"🧠 AI is analyzing {file.name} in depth...")
+                    saved_answer = config.DEMO_MODE and scoring_cache_key(
+                        full_text,
+                        st.session_state.current_jd,
+                        st.session_state.custom_rules,
+                        st.session_state.current_job_title,
+                    ) in demo_snapshot()
+                    if saved_answer:
+                        st.write(f"📦 Using the saved AI result for {file.name} (sample resume with the default rules)")
+                    else:
+                        st.write(f"🧠 AI is analyzing {file.name} in depth...")
 
                     result_json, is_ok = score_resume(
                         file.name,
