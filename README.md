@@ -11,7 +11,7 @@ No sign-up and no files needed: sample resumes and candidates are built in.
 
 Before this project I worked in recruiting, first at a headhunting agency and then as a Talent Acquisition intern coordinating 40+ candidates a week. Three problems kept coming back:
 
-1. **First-round screening is slow and inconsistent.** Every resume is read by hand, and two people screening for the same role do not always apply the same standard.
+1. **First-round screening is slow and inconsistent.** Every resume is read by hand, technical roles bring requirements that recruiters do not always have the background to judge, and two people screening for the same role do not always apply the same standard.
 2. **Scheduling interviews is mostly back-and-forth.** Finding one slot that works for a candidate and several interviewers can take a chain of emails and calls for a single interview.
 3. **Nobody can see where the funnel breaks.** Candidate records exist, but there is no simple view of where people drop out, whether the salary budget is realistic, or which requirements screen out most applicants.
 
@@ -72,8 +72,8 @@ I led a four-person course team ([full team below](#team)). My part:
 
 Each of these comes from a risk I wanted the system to avoid:
 
-- **People make the decisions, not the AI.** The AI only screens. No one is invited without a manager's approval, low scorers can be rescued for 48 hours before any rejection email, and a manager who declines someone must write the reason, which then feeds the analytics.
-- **The AI never does the math.** The model only reports which rules applied and their points; the code computes the score and decides the next step. A model mistake cannot silently change a candidate's outcome, and an unreadable answer is rejected instead of saved.
+- **The AI screens, people decide who is interviewed.** The AI only filters out clear mismatches so the hiring manager, who understands the technical requirements, can focus on the rest. No one is invited without a manager's approval, and a manager who declines someone must write the reason, which then feeds the analytics. Low scorers are not rejected right away: for 48 hours a manager can read every deduction and move anyone back. If no one steps in, the rejection email is sent automatically.
+- **The AI never does the math.** The model only reports which rules applied and their points; the code computes the score and decides the next step. An arithmetic slip or an unreadable answer cannot change a candidate's outcome. A wrong judgment by the model still can, which is why every adjustment is listed for the manager to check.
 - **Rules are written down and editable.** Recruiters can read and change every rule, and the app warns about rules with no point values or rules too lenient to ever reject anyone.
 - **The AI report never sees personal data.** The app computes every statistic first; the AI only explains aggregated numbers, never names, emails or resumes.
 
