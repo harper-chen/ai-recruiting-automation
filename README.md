@@ -79,9 +79,9 @@ Each of these comes from a risk I wanted the system to avoid:
 
 ## What I learned
 
-In November 2026, months after the course ended, the live demo suddenly stopped scoring resumes with the error `JSON mode is not enabled for api version v1`. The code had not changed. The deployment log showed why: the cloud host had installed version 3.0 of Google's AI library, a new major release whose default API version no longer supports the JSON output the app relies on, because `requirements.txt` accepted any version.
+In November 2026, months after the course ended, the live demo suddenly stopped scoring resumes with the error `JSON mode is not enabled for api version v1`. The code had not changed. I could not work out the cause on my own, so I diagnosed it step by step with an AI assistant. The deployment log showed that the cloud host had installed version 3.0 of Google's AI library, a new major release whose default API version no longer supports the JSON output the app relies on, because `requirements.txt` accepted any version.
 
-I fixed it by setting the API version explicitly and capping the library below its next major version. I also found that the app retried this permanent error six times per resume, which used up the free daily quota, so it now stops at the first error that cannot succeed. I also saved the AI results for the sample resumes, so the demo keeps working when the quota runs out. The lesson I took away: code that depends on outside services needs pinned versions, explicit settings and a plan for when those services fail.
+Following that diagnosis, I set the API version explicitly and capped the library below its next major version. The app had also been retrying this permanent error six times per resume, which used up the free daily quota, so it now stops at the first error that cannot succeed. I also saved the AI results for the sample resumes, so the demo keeps working when the quota runs out. Two lessons: code that depends on outside services needs pinned versions, explicit settings and a plan for when those services fail; and I want to be able to diagnose a failure like this myself, not only fix it with help.
 
 ## Try the demo
 
@@ -151,7 +151,7 @@ If a hired candidate declines or takes another offer, HR can set `Offer Declined
 - **Duplicate guard.** A (job, email) pair already in the sheet is not written twice.
 - **Interview slots.** Free time is the complement of all interviewers' busy blocks over the next 21 days, on weekdays within 09:00-12:00 and 13:00-18:00, shown on the hour and half hour.
 - **One source for the scoring scale.** The baseline, threshold, delay and suggested point ranges are constants in `config.py`, read by both the UI and the AI prompts.
-- **Error handling.** AI calls retry temporary errors (such as `503 UNAVAILABLE`) up to three times with backoff, but stop immediately on permanent errors and quota limits so they do not waste the free quota.
+- **Error handling.** AI calls try up to three times with backoff on temporary errors (such as `503 UNAVAILABLE`), but stop immediately on permanent errors and quota limits so they do not waste the free quota.
 
 </details>
 
@@ -197,7 +197,7 @@ The `status` values are defined in `config.py` and must match the sheet exactly 
 ├── insights.py                 # Analytics statistics + prompt for the AI report (no personal data)
 ├── demo_support.py             # Demo-only helpers: visitor tags, sample candidates, cleanup plan
 ├── scoring.py                  # Pure score arithmetic + rule checks (unit tested)
-├── tests/                      # Unit tests for scoring.py and demo_support.py
+├── tests/                      # Unit tests for scoring.py, demo_support.py and insights.py
 ├── config.py                   # Settings, scoring scale and the status-machine constants
 ├── calendar_busytime.py        # Reads interviewers' busy blocks (or simulates them in demo mode)
 ├── calendar_sync.py            # Creates the Calendar event + Google Meet link
