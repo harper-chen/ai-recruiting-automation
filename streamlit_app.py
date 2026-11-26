@@ -18,12 +18,14 @@ from google.oauth2.service_account import Credentials
 
 import config
 import demo_support
+import i18n
+from i18n import t as tr  # `t` is used below as a time variable
 from calendar_busytime import fetch_and_save_calendar_data
 from calendar_sync import create_interview_event
-from config import COMPANY_NAME, STATUS_INVITED_NO_REPLY, STATUS_SCHEDULED, WEEKDAYS
+from config import STATUS_INVITED_NO_REPLY, STATUS_SCHEDULED, WEEKDAYS
 
 # ========== Page setup ==========
-st.set_page_config(page_title="Interview Scheduling", layout="wide")
+st.set_page_config(page_title=tr("b_page_title"), layout="wide")
 
 st.markdown(
     """
@@ -36,16 +38,20 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("👔 Interview Scheduling")
+# English by default; ?lang=zh (added to interview invitations sent from the Chinese HR app) switches to Chinese.
+i18n.render_language_switch()
+LANG = i18n.get_lang()
+
+st.title(tr("b_title"))
 
 if config.DEMO_MODE:
-    st.warning(
-        "🧪 **Demo mode.** The interviewers' calendars are simulated, no real Google Calendar event is created, "
-        "and no email is sent. Pick an invited candidate below and book a slot as them."
-    )
+    st.warning(tr("b_demo"))
     hr_app_url = config.get_setting("HR_APP_URL")
     if hr_app_url:
-        st.caption(f"This is the candidate side. The recruiter side is the [HR Command Center]({hr_app_url}).")
+        st.caption(tr("b_hr_link", url=i18n.with_lang(hr_app_url)))
+
+# "Asia/Taipei" reads oddly in a Chinese sentence; show 台北 there.
+TIMEZONE_LABEL = "台北" if LANG == "zh" else config.TIMEZONE_NAME
 
 WORK_SESSIONS = [(9, 12), (13, 18)]  # working hours, 24h clock
 BUFFER = timedelta(minutes=15)
@@ -60,16 +66,16 @@ def get_live_calendar_data():
     try:
         return fetch_and_save_calendar_data(config.get_interviewer_emails())
     except Exception as e:
-        st.error(f"❌ Could not load the interviewers' calendars. Please try again later. ({e})")
+        st.error(tr("b_calendar_failed", error=e))
         st.stop()
 
 
-with st.spinner("🔄 Syncing the interviewers' latest calendars..."):
+with st.spinner(tr("b_syncing")):
     data = get_live_calendar_data()
 
 emails = list(data.keys())
 if len(emails) < 2:
-    st.error("❌ Not enough calendar data (at least 2 interviewers are required).")
+    st.error(tr("b_not_enough"))
     st.stop()
 
 # Pool every interviewer's busy blocks so an interview only lands where all of them are free
@@ -97,7 +103,7 @@ def open_sheet():
 
 
 @st.cache_data(ttl=30)
-def demo_invited_candidates(visitor_tag):
+def demo_invited_candidates(visitor_tag, lang="en"):
     """Demo only: candidates a visitor may book as. The built-in sample candidates who were invited, plus the
     visitor's own candidates they invited in the HR demo (matched by the private code in the invite link)."""
     candidates = []
@@ -106,9 +112,9 @@ def demo_invited_candidates(visitor_tag):
             continue
         name, email = row[2].strip(), row[3].strip()
         if demo_support.is_seed_email(email):
-            candidates.append({"name": name, "email": email, "label": f"{name} (sample candidate)"})
+            candidates.append({"name": name, "email": email, "label": tr("b_sample_label", name=name)})
         elif visitor_tag and demo_support.belongs_to_visitor(email, visitor_tag):
-            candidates.insert(0, {"name": name, "email": email, "label": f"{name} (your candidate from the HR demo)"})
+            candidates.insert(0, {"name": name, "email": email, "label": tr("b_own_label", name=name)})
     return candidates
 
 
@@ -208,7 +214,7 @@ for date_str, time_range in available.keys():
             slot_key = str((date_str, time_range))
             if slot_key not in st.session_state.booked_global:
                 date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-                day_name = WEEKDAYS[date_obj.weekday()]
+                day_name = i18n.weekday(date_obj.weekday(), WEEKDAYS)
                 available_slots.append(
                     {"display": f"{date_str} ({day_name}) {time_range}", "date": date_str, "time": time_range}
                 )
@@ -217,33 +223,30 @@ if st.session_state.confirmed:
     # ========== Booking confirmed ==========
     date_str, time_range = st.session_state.confirmed_info
     date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-    day_name = WEEKDAYS[date_obj.weekday()]
+    day_name = i18n.weekday(date_obj.weekday(), WEEKDAYS)
 
-    st.success("✅ Your interview is booked!")
-    st.info(f"📅 Time: {date_str} ({day_name}) {time_range}")
+    st.success(tr("b_booked"))
+    st.info(tr("b_time", date=date_str, day=day_name, range=time_range))
     if st.session_state.meet_link:
-        st.info(f"🔗 Google Meet room: {st.session_state.meet_link}")
-    st.info("A confirmation email and calendar invitation have been sent to your inbox. To change the time, please contact the recruiting team.")
+        st.info(tr("b_meet", url=st.session_state.meet_link))
+    st.info(tr("b_sent"))
     st.balloons()
     if config.DEMO_MODE and st.session_state.get("demo_email_preview"):
         to, subject, contents = st.session_state.demo_email_preview
-        with st.expander(f"📧 Demo preview (not sent) - {subject}", expanded=True):
-            st.caption(f"To: {to}")
+        with st.expander(tr("b_preview", subject=subject), expanded=True):
+            st.caption(tr("b_to", to=to))
             st.text(contents)
     if config.DEMO_MODE:
         if st.session_state.get("simulated_only"):
-            st.caption(
-                "Demo: this was a sample candidate, so the booking was simulated and not saved. The candidate and "
-                "the slot stay available for the next visitor."
-            )
-        if st.button("🔁 Try another booking"):
+            st.caption(tr("b_simulated"))
+        if st.button(tr("b_again")):
             for key in ("confirmed", "confirmed_info", "selected_slot", "meet_link", "demo_email_preview", "simulated_only"):
                 st.session_state.pop(key, None)
             st.rerun()
 
 else:
     # ========== Slot selection ==========
-    st.markdown("### 📝 Your details")
+    st.markdown(tr("b_details"))
 
     default_name = st.query_params.get("name", "")
     default_email = st.query_params.get("email", "")
@@ -252,36 +255,38 @@ else:
         # Demo: choose an invited candidate instead of typing, so visitors cannot get stuck on typos
         # (visitor emails in the sheet carry a private code, e.g. ariel.lin+k3f9@example.com).
         try:
-            demo_choices = demo_invited_candidates(st.query_params.get("v", ""))
+            demo_choices = demo_invited_candidates(st.query_params.get("v", ""), LANG)
         except Exception as sheet_error:  # noqa: BLE001
-            st.error(f"❌ Could not load the demo candidates. Please try again later. ({sheet_error})")
+            st.error(tr("b_load_failed", error=sheet_error))
             st.stop()
         if not demo_choices:
-            st.info("No invited candidates are available right now. Please try again in a moment.")
+            st.info(tr("b_none_invited"))
             st.stop()
         labels = [c["label"] for c in demo_choices]
         preselect = next((i for i, c in enumerate(demo_choices) if c["email"] == default_email), 0)
         picked = demo_choices[
-            labels.index(st.selectbox("📋 Book as this invited candidate:", labels, index=preselect, key="demo_candidate"))
+            labels.index(
+                st.selectbox(tr("b_book_as"), labels, index=preselect, key="demo_candidate" if LANG == "en" else f"demo_candidate_{LANG}")
+            )
         ]
         applicant_name, applicant_email = picked["name"], picked["email"]
         col1, col2 = st.columns(2)
-        col1.text_input("Full name", value=applicant_name, disabled=True, key=f"name_{applicant_email}")
-        col2.text_input("Email address", value=applicant_email, disabled=True, key=f"email_{applicant_email}")
+        col1.text_input(tr("b_full_name"), value=applicant_name, disabled=True, key=f"name_{applicant_email}")
+        col2.text_input(tr("b_email"), value=applicant_email, disabled=True, key=f"email_{applicant_email}")
     else:
         col1, col2 = st.columns(2)
         with col1:
             applicant_name = st.text_input(
-                "Your full name (must match your résumé)", value=default_name, placeholder="e.g. Alex Taylor"
+                tr("b_your_name"), value=default_name, placeholder=tr("b_name_ph")
             )
         with col2:
             applicant_email = st.text_input(
-                "Your email address (must match your résumé)", value=default_email, placeholder="e.g. name@example.com"
+                tr("b_your_email"), value=default_email, placeholder=tr("b_email_ph")
             )
 
     st.divider()
-    st.markdown("### 📅 Choose an interview slot that works for you")
-    st.caption(f"All times are {config.TIMEZONE_NAME} (GMT+{config.TIMEZONE_OFFSET_HOURS}).")
+    st.markdown(tr("b_choose_slot"))
+    st.caption(tr("b_timezone", tz=TIMEZONE_LABEL, offset=config.TIMEZONE_OFFSET_HOURS))
 
     if available_slots:
         by_date = {}
@@ -290,8 +295,8 @@ else:
 
         for date_str in sorted(by_date.keys()):
             date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-            day_name = WEEKDAYS[date_obj.weekday()]
-            st.markdown(f"**📅 {date_str} ({day_name})**")
+            day_name = i18n.weekday(date_obj.weekday(), WEEKDAYS)
+            st.markdown(tr("b_date_heading", date=date_str, day=day_name))
             slots = by_date[date_str]
             cols = st.columns(4)
 
@@ -316,15 +321,15 @@ else:
         # ========== Confirm button ==========
         if st.session_state.selected_slot:
             st.divider()
-            if st.button("Confirm booking", use_container_width=True, key="confirm_final"):
+            if st.button(tr("b_confirm"), use_container_width=True, key="confirm_final"):
 
                 if not applicant_name.strip() or not applicant_email.strip():
-                    st.warning("⚠️ Enter your name and email at the top of the page before confirming.")
+                    st.warning(tr("b_need_details"))
                 else:
                     date_str, time_range = st.session_state.selected_slot
                     start_time, end_time = time_range.split("-")
 
-                    st.info("🔄 Verifying your applicant record...")
+                    st.info(tr("b_verifying"))
 
                     try:
                         print("[system log] Connecting to Google Sheets to verify the applicant...")
@@ -339,20 +344,17 @@ else:
                                 break
 
                         if not target_row_index:
-                            st.error(
-                                "🛑 Verification failed. No application matches this name and email. Check for typos, "
-                                "and make sure you have passed the initial screening and received an interview invitation."
-                            )
+                            st.error(tr("b_verify_failed"))
                         else:
                             check_start_final = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M") - BUFFER
                             check_end_final = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M") + BUFFER
 
                             if not is_slot_available(date_str, time_range, st.session_state.booked_global):
-                                st.error("🛑 Booking failed: another candidate just took this slot. Please choose a different one.")
+                                st.error(tr("b_taken"))
                             elif is_busy(check_start_final, check_end_final, busy_times_global):
-                                st.error("🛑 Booking failed: an interviewer's schedule just changed for this slot. Please choose a different one.")
+                                st.error(tr("b_changed"))
                             else:
-                                st.success("🎉 Verified, and the slot is still free. Creating your Google Calendar event...")
+                                st.success(tr("b_creating"))
 
                                 event_id, google_meet_url = create_interview_event(
                                     applicant_name, applicant_email, date_str, start_time, end_time
@@ -375,7 +377,7 @@ else:
                                         sheet.update_cell(target_row_index, 11, google_meet_url)
                                         demo_invited_candidates.clear()
 
-                                    st.info("✉️ Sending your confirmation email...")
+                                    st.info(tr("b_sending"))
 
                                     try:
                                         if config.DEMO_MODE:
@@ -385,39 +387,32 @@ else:
                                             gmail_app_password = st.secrets["GMAIL_APP_PASSWORD"]
                                             yag = yagmail.SMTP(user=sender_email, password=gmail_app_password)
 
-                                        subject = f"[Interview Confirmed] {COMPANY_NAME} - technical interview booked"
-                                        body = f"""Dear {applicant_name},
-
-You have successfully booked a technical interview with {COMPANY_NAME.rstrip('.')}. Your interview details are below. Please arrive on time.
-
-📅 Date: {date_str}
-⏰ Time: {start_time} - {end_time} ({config.TIMEZONE_NAME}, GMT+{config.TIMEZONE_OFFSET_HOURS})
-💻 Online meeting link (Google Meet): {google_meet_url}
-
-💡 Tips:
-1. On the day, click the Google Meet link above to join. The hiring manager will meet you online.
-2. We suggest testing your microphone, camera and network connection 5 minutes before the interview.
-
-Good luck!
-
-Sincerely,
-The {COMPANY_NAME} Recruiting Team
-"""
+                                        company = config.company_name(LANG)
+                                        subject = tr("b_mail_subject", company=company)
+                                        body = tr(
+                                            "b_mail_body",
+                                            name=applicant_name,
+                                            company=company,
+                                            company_short=company.rstrip("."),
+                                            date=date_str,
+                                            start=start_time,
+                                            end=end_time,
+                                            tz=TIMEZONE_LABEL,
+                                            offset=config.TIMEZONE_OFFSET_HOURS,
+                                            url=google_meet_url,
+                                        )
                                         yag.send(to=applicant_email, subject=subject, contents=body)
                                     except Exception as email_err:
-                                        st.warning(f"Your interview is booked, but the confirmation email failed to send: {email_err}")
+                                        st.warning(tr("b_mail_failed", error=email_err))
 
                                     st.session_state.confirmed = True
                                     st.session_state.confirmed_info = (date_str, time_range)
                                     st.session_state.meet_link = google_meet_url
                                     st.rerun()
                                 else:
-                                    st.error("Something unexpected happened. Please try again later.")
+                                    st.error(tr("b_unexpected"))
                     except Exception as e:
-                        st.error(f"Something unexpected happened. Please try again later: {e}")
+                        st.error(tr("b_unexpected_detail", error=e))
 
     else:
-        st.info(
-            "The interview schedule is very full right now and every slot is taken. "
-            f"Please call the HR team to book an interview: {config.CONTACT_PHONE}"
-        )
+        st.info(tr("b_full", phone=config.CONTACT_PHONE))

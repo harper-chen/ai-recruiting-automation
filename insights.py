@@ -10,16 +10,20 @@ import re
 
 import pandas as pd
 
-# ---- Why candidates drop out: keyword classifier over free text (English, because the AI writes in English) ----
-MANAGER_SALARY_WORDS = ["budget", "salary", "pay", "compensation", "expensive", "cost"]
+# ---- Why candidates drop out: keyword classifier over free text ----
+# English and Traditional Chinese: the AI writes in the language of the interface, and managers comment in either.
+MANAGER_SALARY_WORDS = ["budget", "salary", "pay", "compensation", "expensive", "cost",
+                        "預算", "薪資", "薪水", "待遇", "太貴", "成本"]
 AI_SALARY_PATTERNS = (
     r"over budget|above budget|exceed(?:s|ed|ing)? (?:the )?(?:budget|range|salary)|"
     r"above the (?:range|budget)|"
-    r"too high|overpriced|salary expectation (?:is )?(?:too )?high|higher than"
+    r"too high|overpriced|salary expectation (?:is )?(?:too )?high|higher than|"
+    r"超出預算|高於預算|超過預算|超出.{0,6}範圍|高於.{0,6}範圍|薪資.{0,8}(?:過高|偏高|太高)"
 )
 AI_SKILL_PATTERNS = (
     r"\b(?:lack|lacks|lacking|no|not|limited|insufficient|missing|without|unfamiliar|"
-    r"basic|junior|mismatch|gap|weak)\b"
+    r"basic|junior|mismatch|gap|weak)\b|"
+    r"缺乏|不足|沒有|未具備|不具備|不熟|僅具基礎|初階|不符|落差|未達"
 )
 
 
@@ -159,7 +163,12 @@ def build_summary(df, invited_statuses, hired_status, threshold, is_demo=False):
     return summary
 
 
-def build_prompt(summary):
+LANGUAGE_LINE_ZH = (
+    "- Write every text value in Traditional Chinese as used in Taiwan (繁體中文，台灣用語). Keep the JSON keys in English.\n"
+)
+
+
+def build_prompt(summary, lang="en"):
     """Instructions plus the facts. The model must explain these numbers, not add its own."""
     facts = json.dumps(summary, indent=1, ensure_ascii=False)
     demo_line = (
@@ -190,7 +199,7 @@ Reply with this JSON only (plain text values: no Markdown, no emoji, no preamble
 - Use cautious wording ("may", "worth checking"); do not claim causes.
 - Talk about the process and the job requirements, never about individual people or protected characteristics.
 - Salaries are monthly, in TWD.
-{demo_line}"""
+{demo_line}{LANGUAGE_LINE_ZH if lang == "zh" else ""}"""
 
 
 def parse_report(raw_text):
@@ -223,23 +232,56 @@ def parse_report(raw_text):
     return report
 
 
-def summary_tables(summary):
-    """The same numbers the AI saw, as small readable tables: [(title, DataFrame), ...]."""
+TABLE_TEXT = {
+    "en": {
+        "exp_cols": ["Experience", "Applicants", "Interview rate (%)", "Median expected salary (TWD)"],
+        "exp_title": "Conversion by experience",
+        "reason_cols": ["Reason", "Candidates"],
+        "reason_title": "Why candidates dropped out",
+        "deductions_title": "Most triggered deductions",
+        "bonuses_title": "Most triggered bonuses",
+        "rule_cols": ["Rule", "Points", "Candidates", "Share of applicants (%)", "Interview rate among them (%)"],
+        "skill_cols": ["Skill", "Candidates", "Median expected salary (TWD)"],
+        "skill_title": "Common skills",
+    },
+    "zh": {
+        "exp_cols": ["年資", "應徵人數", "面試轉換率（%）", "期待薪資中位數（新台幣）"],
+        "exp_title": "各年資的轉換率",
+        "reason_cols": ["原因", "人數"],
+        "reason_title": "候選人流失原因",
+        "deductions_title": "最常觸發的扣分規則",
+        "bonuses_title": "最常觸發的加分規則",
+        "rule_cols": ["規則", "分數", "人數", "占應徵者比例（%）", "其中進入面試的比例（%）"],
+        "skill_cols": ["技能", "人數", "期待薪資中位數（新台幣）"],
+        "skill_title": "常見技能",
+    },
+}
+
+
+def summary_tables(summary, lang="en", label=lambda code: code):
+    """The same numbers the AI saw, as small readable tables: [(title, DataFrame), ...].
+
+    `label` turns codes (experience bands, drop-out reasons) into display text for a translated interface.
+    """
+    text = TABLE_TEXT["zh" if lang == "zh" else "en"]
     tables = []
     if summary.get("by_experience"):
         df = pd.DataFrame(summary["by_experience"]).T.reset_index()
-        df.columns = ["Experience", "Applicants", "Interview rate (%)", "Median expected salary (TWD)"]
-        tables.append(("Conversion by experience", df))
+        df.columns = text["exp_cols"]
+        df[text["exp_cols"][0]] = df[text["exp_cols"][0]].map(label)
+        tables.append((text["exp_title"], df))
     if summary.get("why_candidates_dropped_out"):
-        df = pd.DataFrame(list(summary["why_candidates_dropped_out"].items()), columns=["Reason", "Candidates"])
-        tables.append(("Why candidates dropped out", df))
-    for key, title in (("most_triggered_deductions", "Most triggered deductions"), ("most_triggered_bonuses", "Most triggered bonuses")):
+        df = pd.DataFrame(
+            [(label(k), v) for k, v in summary["why_candidates_dropped_out"].items()], columns=text["reason_cols"]
+        )
+        tables.append((text["reason_title"], df))
+    for key, title_key in (("most_triggered_deductions", "deductions_title"), ("most_triggered_bonuses", "bonuses_title")):
         if summary.get(key):
             df = pd.DataFrame(summary[key])
-            df.columns = ["Rule", "Points", "Candidates", "Share of applicants (%)", "Interview rate among them (%)"]
-            tables.append((title, df))
+            df.columns = text["rule_cols"]
+            tables.append((text[title_key], df))
     if summary.get("common_skills"):
         df = pd.DataFrame(summary["common_skills"])
-        df.columns = ["Skill", "Candidates", "Median expected salary (TWD)"]
-        tables.append(("Common skills", df))
+        df.columns = text["skill_cols"]
+        tables.append((text["skill_title"], df))
     return tables
