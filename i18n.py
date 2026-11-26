@@ -138,6 +138,17 @@ def calc_label(text):
     return text.replace("; ", "；")
 
 
+DEMO_MEET_SUFFIX = " (demo link, not a real meeting)"
+
+
+def meet_label(url):
+    """Show the demo meeting link note in Chinese. The stored link keeps the English note."""
+    url = str(url or "")
+    if is_zh() and url.endswith(DEMO_MEET_SUFFIX):
+        return url[: -len(DEMO_MEET_SUFFIX)] + "（示範連結，不是真的會議）"
+    return url
+
+
 def status_label(code):
     return STATUS_ZH.get(code, code) if is_zh() else code
 

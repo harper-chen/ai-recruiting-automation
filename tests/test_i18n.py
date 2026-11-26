@@ -191,3 +191,15 @@ class TranslatedRuleWarningsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_meet_label_translates_demo_note_only_in_chinese(monkeypatch):
+    if i18n is None:
+        import pytest
+        pytest.skip("streamlit is not installed")
+    url = "https://meet.example.com/demo-abc" + i18n.DEMO_MEET_SUFFIX
+    monkeypatch.setattr(i18n, "get_lang", lambda: "en")
+    assert i18n.meet_label(url) == url
+    monkeypatch.setattr(i18n, "get_lang", lambda: "zh")
+    assert i18n.meet_label(url) == "https://meet.example.com/demo-abc（示範連結，不是真的會議）"
+    assert i18n.meet_label("https://meet.google.com/real") == "https://meet.google.com/real"

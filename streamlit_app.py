@@ -228,7 +228,7 @@ if st.session_state.confirmed:
     st.success(tr("b_booked"))
     st.info(tr("b_time", date=date_str, day=day_name, range=time_range))
     if st.session_state.meet_link:
-        st.info(tr("b_meet", url=st.session_state.meet_link))
+        st.info(tr("b_meet", url=i18n.meet_label(st.session_state.meet_link)))
     st.info(tr("b_sent"))
     st.balloons()
     if config.DEMO_MODE and st.session_state.get("demo_email_preview"):
@@ -399,7 +399,7 @@ else:
                                             end=end_time,
                                             tz=TIMEZONE_LABEL,
                                             offset=config.TIMEZONE_OFFSET_HOURS,
-                                            url=google_meet_url,
+                                            url=i18n.meet_label(google_meet_url),
                                         )
                                         yag.send(to=applicant_email, subject=subject, contents=body)
                                     except Exception as email_err:
