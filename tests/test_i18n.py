@@ -80,6 +80,14 @@ class TextTableTests(unittest.TestCase):
         statuses = [value for name, value in vars(config).items() if name.startswith("STATUS_")]
         self.assertEqual(set(statuses) - set(i18n.STATUS_ZH), set())
 
+    def test_score_arithmetic_is_shown_in_chinese(self):
+        stored = "70 baseline; -10 期待薪資高於預算; +5 雲端部署 = 65"
+        with self.use_lang(None):
+            self.assertEqual(i18n.calc_label(stored), stored)
+        with self.use_lang("zh"):
+            self.assertEqual(i18n.calc_label(stored), "基準 70 分；-10 期待薪資高於預算；+5 雲端部署 = 65")
+            self.assertEqual(i18n.calc_label("70 baseline; +40 x = 110 (capped to 100)"), "基準 70 分；+40 x = 110（上限調整為 100 分）")
+
     def test_every_drop_out_reason_has_a_chinese_label(self):
         rows = [
             {"manager_comment": "budget"},
@@ -152,6 +160,15 @@ class ChineseAnalyticsTests(unittest.TestCase):
         self.assertEqual(titles, ["各年資的轉換率", "候選人流失原因"])
         self.assertEqual(tables[0][1].iloc[0, 0], "0–2 年")
         self.assertEqual(tables[1][1].iloc[0, 0], "AI：其他不符")
+
+    def test_english_view_hides_chinese_jobs(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {"job_applied": ["Python Backend Engineer", "Python 後端開發工程師", "Data Analyst"], "name": ["A", "林雅婷", "B"]}
+        )
+        self.assertEqual(insights.hide_chinese_jobs(df)["name"].tolist(), ["A", "B"])
+        self.assertTrue(insights.hide_chinese_jobs(pd.DataFrame()).empty)
 
     def test_english_tables_are_unchanged(self):
         summary = {"why_candidates_dropped_out": {"AI: other mismatch": 1}}
