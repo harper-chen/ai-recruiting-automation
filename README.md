@@ -94,6 +94,8 @@ Following that diagnosis, I set the API version explicitly and capped the librar
 
 You can also upload your own PDF resumes. In demo mode no email is sent and no calendar event is created. Your candidates are visible only to you (a private code is kept in the page URL) and are deleted after 24 hours.
 
+**Traditional Chinese:** add `?lang=zh` to either URL ([HR Command Center in Chinese](https://harper-hr-dashboard.streamlit.app/?lang=zh)), or use the language switch at the top of the page. English is always the default. In Chinese, the demo loads a Chinese sample job (Python 後端開發工程師) and four Chinese sample resumes, the AI writes its scoring reasons, drafted rules and analytics report in Chinese, the emails are in Chinese, and interview invitations open the booking page in Chinese. Status values in the sheet and the scoring arithmetic are the same in both languages.
+
 ## Limitations
 
 This is a class project, not a production hiring system.
@@ -197,15 +199,16 @@ The `status` values are defined in `config.py` and must match the sheet exactly 
 ├── insights.py                 # Analytics statistics + prompt for the AI report (no personal data)
 ├── demo_support.py             # Demo-only helpers: visitor tags, sample candidates, cleanup plan
 ├── scoring.py                  # Pure score arithmetic + rule checks (unit tested)
-├── tests/                      # Unit tests for scoring.py, demo_support.py and insights.py
+├── i18n.py                     # English / Traditional Chinese text for both apps (?lang=zh)
+├── tests/                      # Unit tests for scoring.py, demo_support.py, insights.py and the translations
 ├── config.py                   # Settings, scoring scale and the status-machine constants
 ├── calendar_busytime.py        # Reads interviewers' busy blocks (or simulates them in demo mode)
 ├── calendar_sync.py            # Creates the Calendar event + Google Meet link
 ├── clear_calendar_events.py    # Test helper: bulk-delete "[Interview]" events
 ├── apps_script/Code.gs         # Drive upload proxy (deploy as an Apps Script web app)
 ├── tools/generate_samples.py   # Regenerates the sample JD / resume PDFs
-├── sample_jd/                  # Example job descriptions and the sample scoring rules
-├── sample_resumes/             # Six fictional candidate resumes
+├── sample_jd/                  # Example job descriptions and the sample scoring rules (zh/: Chinese sample job)
+├── sample_resumes/             # Six fictional candidate resumes (zh/: four Chinese ones)
 ├── jd.txt                      # Plain-text JD, preloaded as the demo's sample job
 ├── secrets.example.toml        # Every secret / setting the apps read
 ├── credentials.json.example    # Placeholder for the OAuth client file

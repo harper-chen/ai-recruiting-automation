@@ -47,8 +47,25 @@ def parse_scoring_response(raw_text, baseline):
     return data
 
 
-def analyze_rules(rules_text, baseline, threshold):
-    """Cheap sanity checks on free-text rules. Returns (warnings, has_points)."""
+RULE_WARNINGS_EN = {
+    "no_points": (
+        "No point values found. Write each rule with an explicit signed number such as -15 or +5, "
+        "otherwise nobody can be scored."
+    ),
+    "no_deductions": "There are no deduction rules, so nobody can be screened out.",
+    "never_rejected": (
+        "Even a candidate who triggers every deduction would score {score}, which is still "
+        "at or above the {threshold} threshold, so nobody can be auto-rejected."
+    ),
+}
+
+
+def analyze_rules(rules_text, baseline, threshold, messages=None):
+    """Cheap sanity checks on free-text rules. Returns (warnings, has_points).
+
+    `messages` can replace the English warning texts (same keys as RULE_WARNINGS_EN), for a translated interface.
+    """
+    messages = {**RULE_WARNINGS_EN, **(messages or {})}
     deductions = 0.0
     n_ded = n_bon = 0
     for line in rules_text.splitlines():
@@ -64,16 +81,10 @@ def analyze_rules(rules_text, baseline, threshold):
 
     warnings = []
     if n_ded + n_bon == 0:
-        warnings.append(
-            "No point values found. Write each rule with an explicit signed number such as -15 or +5, "
-            "otherwise nobody can be scored."
-        )
+        warnings.append(messages["no_points"])
         return warnings, False
     if n_ded == 0:
-        warnings.append("There are no deduction rules, so nobody can be screened out.")
+        warnings.append(messages["no_deductions"])
     elif baseline - deductions >= threshold:
-        warnings.append(
-            f"Even a candidate who triggers every deduction would score {baseline - deductions:g}, which is still "
-            f"at or above the {threshold} threshold, so nobody can be auto-rejected."
-        )
+        warnings.append(messages["never_rejected"].format(score=f"{baseline - deductions:g}", threshold=threshold))
     return warnings, True

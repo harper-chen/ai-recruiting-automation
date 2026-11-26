@@ -67,6 +67,12 @@ def get_interviewer_emails():
 # ---------------------------------------------------------------------------
 
 COMPANY_NAME = get_setting("COMPANY_NAME", "Acme Technology Ltd.")
+COMPANY_NAME_ZH = get_setting("COMPANY_NAME_ZH", "Acme 科技股份有限公司")  # used in Chinese emails (?lang=zh)
+
+
+def company_name(lang="en"):
+    return COMPANY_NAME_ZH if lang == "zh" else COMPANY_NAME
+
 CONTACT_PHONE = get_setting("CONTACT_PHONE", "555-0100")
 SHEET_NAME = get_setting("SHEET_NAME", "HR Applicant Tracker")
 REPO_URL = get_setting("REPO_URL", "https://github.com/harper-chen/ai-recruiting-automation")  # where sample resumes are linked from in demo mode

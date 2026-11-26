@@ -37,12 +37,13 @@ from plotly.subplots import make_subplots
 
 import config
 import demo_support
+import i18n
 import insights
+from i18n import t
 from insights import categorize_reason
 from scoring import analyze_rules as _analyze_rules
 from scoring import parse_scoring_response as _parse_scoring_response
 from config import (
-    COMPANY_NAME,
     INVITED_STATUSES,
     BASELINE_SCORE,
     REJECTION_DELAY_HOURS,
@@ -57,7 +58,7 @@ from config import (
 )
 
 # ==================== Core setup and cached clients ====================
-st.set_page_config(page_title="HRIS Recruiting Command Center", layout="wide", page_icon="👔")
+st.set_page_config(page_title=t("page_title"), layout="wide", page_icon="👔")
 
 UI_THEME = {
     "TITLE_COLOR": "#154360",
@@ -81,14 +82,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# English by default; ?lang=zh in the URL switches to Traditional Chinese.
+i18n.render_language_switch()
+LANG = i18n.get_lang()
+
 if config.DEMO_MODE:
-    st.warning(
-        "🧪 **Demo mode.** No real emails are sent, no calendar events are created, and your uploads are not "
-        "stored in Drive. Emails are shown on screen instead. Saved job profiles live only in your browser session. "
-        "Candidates you upload are tagged with your private code (for example ariel.lin+k3f9@example.com), so other "
-        "visitors do not see them, and they are deleted after 24 hours. The Analytics tab also includes about 40 "
-        "fictional sample candidates."
-    )
+    st.warning(t("demo_banner"))
 
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -96,7 +95,7 @@ try:
     SENDER_EMAIL = config.get_setting("SENDER_EMAIL", "demo@example.com") if config.DEMO_MODE else st.secrets["SENDER_EMAIL"]
     GMAIL_APP_PASSWORD = config.get_setting("GMAIL_APP_PASSWORD", "") if config.DEMO_MODE else st.secrets["GMAIL_APP_PASSWORD"]
 except Exception as e:
-    st.error(f"❌ Missing required secret: {e}. Check .streamlit/secrets.toml (see secrets.example.toml).")
+    st.error(t("missing_secret", error=e))
     st.stop()
 
 
@@ -113,7 +112,7 @@ def init_google_sheets():
         gs_client = gspread.authorize(creds_object)
         return gs_client.open(config.SHEET_NAME).sheet1
     except Exception as e:
-        st.error(f"❌ Could not connect to Google Sheets: {e}")
+        st.error(t("sheets_failed", error=e))
         return None
 
 
@@ -124,7 +123,7 @@ def init_ai_client():
         # whatever default the installed SDK version happens to use.
         return genai.Client(api_key=GEMINI_API_KEY, http_options=genai_types.HttpOptions(api_version="v1beta"))
     except Exception as e:
-        st.error(f"❌ AI client initialization failed: {e}")
+        st.error(t("ai_init_failed", error=e))
         return None
 
 
@@ -207,7 +206,7 @@ if config.DEMO_MODE and sheet is not None and not st.session_state.get("housekee
     try:
         demo_housekeeping()
     except Exception as housekeeping_error:  # noqa: BLE001 - never block the app on cleanup
-        st.warning(f"Demo cleanup skipped: {housekeeping_error}")
+        st.warning(t("cleanup_skipped", error=housekeeping_error))
     st.session_state.housekeeping_done = True
 
 
@@ -225,13 +224,35 @@ if "current_job_title" not in st.session_state:
 if "df_dash" not in st.session_state:
     st.session_state.df_dash = pd.DataFrame()
 
+# Internal option values; their labels come from i18n (format_func), so a language switch never breaks a widget.
 ALL_JOBS = "All jobs"
 NEW_JOB = "➕ Add a new job manually"
+
+
+def option_label(value):
+    if value == ALL_JOBS:
+        return t("all_jobs")
+    if value == NEW_JOB:
+        return t("new_job")
+    return value
 
 # ==================== Job profile storage ====================
 PROFILE_FILE = "job_profiles.json"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-SAMPLE_PROFILE_NAME = "Python Backend Engineer"
+# The sample job (JD + rules) and sample resumes follow the interface language.
+SAMPLE_PROFILES = {
+    "en": {
+        "name": "Python Backend Engineer",
+        "jd": "jd.txt",
+        "rules": "sample_jd/python_backend_engineer_rules.txt",
+    },
+    "zh": {
+        "name": "Python 後端開發工程師",
+        "jd": "sample_jd/zh/jd.txt",
+        "rules": "sample_jd/zh/python_backend_engineer_rules.txt",
+    },
+}
+SAMPLE_PROFILE_NAME = SAMPLE_PROFILES[LANG]["name"]
 
 
 def _read_text(relative_path):
@@ -242,12 +263,13 @@ def _read_text(relative_path):
         return ""
 
 
-def sample_profiles():
+def sample_profiles(lang=None):
     """Ready-made job profile so demo visitors can start scoring in two clicks."""
+    sample = SAMPLE_PROFILES[lang or LANG]
     return {
-        SAMPLE_PROFILE_NAME: {
-            "jd": _read_text("jd.txt"),
-            "rules": _read_text("sample_jd/python_backend_engineer_rules.txt"),
+        sample["name"]: {
+            "jd": _read_text(sample["jd"]),
+            "rules": _read_text(sample["rules"]),
         }
     }
 
@@ -258,6 +280,16 @@ def load_job_profiles():
     if config.DEMO_MODE:
         if "job_profiles" not in st.session_state:
             st.session_state.job_profiles = sample_profiles()
+            st.session_state.job_profiles_lang = LANG
+        elif st.session_state.get("job_profiles_lang", "en") != LANG:
+            # Language switched: swap the other language's sample job for this one (only if it was not edited).
+            old = st.session_state.get("job_profiles_lang", "en")
+            old_name = SAMPLE_PROFILES[old]["name"]
+            if st.session_state.job_profiles.get(old_name) == sample_profiles(old).get(old_name):
+                st.session_state.job_profiles.pop(old_name, None)
+            for name, profile in sample_profiles().items():
+                st.session_state.job_profiles.setdefault(name, profile)
+            st.session_state.job_profiles_lang = LANG
         return st.session_state.job_profiles
     if os.path.exists(PROFILE_FILE):
         try:
@@ -307,16 +339,10 @@ def is_permanent_error(error):
 
 def quota_used_up_message():
     """Shown when the free Gemini quota runs out, pointing visitors to what still works."""
-    message = (
-        "Today's free AI quota for this demo is used up (the free Gemini tier allows only a small number of "
-        "requests per day), so new AI requests will work again tomorrow."
-    )
+    message = t("quota_used_up")
     if config.DEMO_MODE and demo_snapshot():
-        message += (
-            " The built-in sample resumes with the default scoring rules still work at any time, because their "
-            "results are saved."
-        )
-    return message + f" You can also see every step in the screenshots on GitHub: {config.REPO_URL}#how-it-works"
+        message += t("quota_samples_ok")
+    return message + t("quota_screenshots", url=config.REPO_URL)
 
 
 def generate_with_retry(prompt, json_mode=False):
@@ -345,7 +371,15 @@ def generate_with_retry(prompt, json_mode=False):
     raise last_error
 
 
-def build_rules_prompt(jd_text):
+RULES_LANGUAGE_ZH = """
+    [LANGUAGE]: Write every rule in Traditional Chinese as used in Taiwan (繁體中文，台灣用語), for example
+    "• 沒有 Python 網頁框架的使用經驗：-10 分。" Always put a full-width colon (：) or a space right before the signed
+    number. Write the final system rule as: "• Email 擷取：請完全照履歷上的寫法擷取真實的電子郵件地址，不得更改拼字。"
+    """
+
+
+def build_rules_prompt(jd_text, lang="en"):
+    language = RULES_LANGUAGE_ZH if lang == "zh" else ""
     return f"""
     You are a senior technical recruiter. Based on the [Job Description (JD)] below, write 7 to 10 of the
     most important "resume scoring rules" (point deductions and bonuses).
@@ -371,7 +405,7 @@ def build_rules_prompt(jd_text):
     3. If the JD states a salary range, add a deduction rule for expected salaries above it.
     4. Each rule must test exactly ONE condition. Never join conditions with AND / OR inside a rule; split them into separate rules.
     5. Keep this system rule as the final line: "• Email extraction: extract the real email address exactly as written; never alter the spelling."
-
+    {language}
     [JOB DESCRIPTION (JD)]:
     {jd_text}
     """
@@ -382,7 +416,7 @@ def rules_cache_key(prompt):
 
 
 def generate_rules_from_jd(jd_text):
-    prompt = build_rules_prompt(jd_text)
+    prompt = build_rules_prompt(jd_text, LANG)
     cache = demo_ai_cache() if config.DEMO_MODE else None
     cache_key = rules_cache_key(prompt)
     if config.DEMO_MODE and cache_key in demo_snapshot():
@@ -396,12 +430,12 @@ def generate_rules_from_jd(jd_text):
             cache[cache_key] = {"raw": text, "at": datetime.now()}
         return text
     except Exception as e:
-        return f"⚠️ Rule generation failed: {e}"
+        return t("rules_failed", error=e)
 
 
 def generate_insights_report(summary):
     """Plain-language report on the analytics numbers. The statistics come from code (insights.py)."""
-    prompt = insights.build_prompt(summary)
+    prompt = insights.build_prompt(summary, LANG)
     cache = demo_ai_cache() if config.DEMO_MODE else None
     cache_key = "report:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     if cache is not None and cache_key in cache:
@@ -410,12 +444,12 @@ def generate_insights_report(summary):
         response = generate_with_retry(prompt, json_mode=True)
         text = response.text.strip()
         if insights.parse_report(text) is None:
-            return "⚠️ The AI answer could not be read as a report. Please press the button again."
+            return t("report_unreadable")
         if cache is not None:
             cache[cache_key] = {"raw": text, "at": datetime.now()}
         return text
     except Exception as e:
-        return f"⚠️ Could not generate the report: {e}"
+        return t("report_failed", error=e)
 
 
 def show_insights_report(report):
@@ -427,16 +461,16 @@ def show_insights_report(report):
         return
     stats = report["summary"]
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Applicants", stats["applicants"])
-    m2.metric("Reached interview", f"{stats['interview_rate_pct']:g}%", f"{stats['reached_interview_stage']} people", delta_color="off")
-    m3.metric("Hired", stats["hired"], f"{stats['hire_rate_pct']:g}% of applicants", delta_color="off")
-    m4.metric("Median score", stats["score_median"] if stats["score_median"] is not None else "-")
+    m1.metric(t("m_applicants"), stats["applicants"])
+    m2.metric(t("m_reached_interview"), f"{stats['interview_rate_pct']:g}%", t("m_people", count=stats["reached_interview_stage"]), delta_color="off")
+    m3.metric(t("m_hired"), stats["hired"], t("m_of_applicants", pct=f"{stats['hire_rate_pct']:g}"), delta_color="off")
+    m4.metric(t("m_median_score"), stats["score_median"] if stats["score_median"] is not None else "-")
 
     if data["summary"]:
-        st.info(f"📌 **Summary**  \n{esc(data['summary'])}")
+        st.info(t("report_summary", text=esc(data["summary"])))
 
     if data["findings"]:
-        st.markdown("#### 🔍 Key findings")
+        st.markdown(t("report_findings"))
         for column, finding in zip(st.columns(len(data["findings"])), data["findings"]):
             with column:
                 with st.container(border=True):
@@ -444,7 +478,7 @@ def show_insights_report(report):
                     st.write(esc(finding["detail"]))
 
     if data["recommendations"]:
-        st.markdown("#### 💡 Recommendations")
+        st.markdown(t("report_recommendations"))
         for number, rec in enumerate(data["recommendations"], start=1):
             with st.container(border=True):
                 st.markdown(f"**{number}. {esc(rec['title'])}**")
@@ -465,13 +499,13 @@ def upload_file_and_get_link(file_path, file_name):
     """
     if config.DEMO_MODE:
         # Never store strangers' uploads. The bundled sample resumes link to their copy on GitHub instead.
-        sample_dir = os.path.join(APP_DIR, "sample_resumes")
-        if os.path.isdir(sample_dir) and file_name in os.listdir(sample_dir):
-            return f"{config.REPO_URL}/blob/main/sample_resumes/{file_name}"
+        relative = sample_resume_path(file_name)
+        if relative:
+            return f"{config.REPO_URL}/blob/main/sample_resumes/{relative}"
         return ""
 
     if not config.APPS_SCRIPT_URL:
-        st.warning("APPS_SCRIPT_URL is not configured, so the resume file will not be stored in Drive.")
+        st.warning(t("no_apps_script"))
         return UPLOAD_FAILED_URL
 
     try:
@@ -483,12 +517,22 @@ def upload_file_and_get_link(file_path, file_name):
 
         if response.status_code == 200 and "Error" not in response.text:
             return response.text.strip()
-        st.error(f"❌ Upload proxy returned an error: {response.text}")
+        st.error(t("proxy_error", error=response.text))
         return UPLOAD_FAILED_URL
 
     except Exception as e:
-        st.error(f"❌ Upload via proxy failed: {e}")
+        st.error(t("proxy_failed", error=e))
         return UPLOAD_FAILED_URL
+
+
+SCORING_LANGUAGE = {
+    "en": "Write all free-text fields in English, even if the resume is in another language.",
+    "zh": (
+        "Write all free-text fields (rule descriptions in adjustments, skills_extracted, score_reason) in Traditional "
+        "Chinese as used in Taiwan (繁體中文，台灣用語), even if the resume is in another language. Keep the JSON keys, "
+        "the candidate's name and email exactly as written, and use the English values listed for highest_education."
+    ),
+}
 
 
 def _score_resume_uncached(file_name, resume_text, jd_text, rules_text, target_job_title):
@@ -496,7 +540,7 @@ def _score_resume_uncached(file_name, resume_text, jd_text, rules_text, target_j
     prompt = f"""
     You are an extremely strict HR hiring manager at a technology company. Using the [Job Description] and the
     [Candidate Resume] below, score the candidate objectively and extract structured data.
-    Write all free-text fields in English, even if the resume is in another language.
+    {SCORING_LANGUAGE[LANG]}
 
     [TARGET JOB TITLE]: {target_job_title}
 
@@ -587,8 +631,13 @@ def _load_demo_snapshot(modified):
         return {}
 
 
-def scoring_cache_key(resume_text, jd_text, rules_text, target_job_title):
-    return hashlib.sha256("\x1f".join([MODEL_NAME, resume_text, jd_text, rules_text, target_job_title]).encode("utf-8")).hexdigest()
+def scoring_cache_key(resume_text, jd_text, rules_text, target_job_title, lang=None):
+    # The AI writes in the interface language, so Chinese answers get their own key. English keys are unchanged,
+    # which keeps the saved English snapshot valid.
+    parts = [MODEL_NAME, resume_text, jd_text, rules_text, target_job_title]
+    if (lang or LANG) == "zh":
+        parts.append("zh")
+    return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
 
 
 def score_resume(file_name, resume_text, jd_text, rules_text, target_job_title):
@@ -627,9 +676,7 @@ def build_demo_snapshot():
     """Owner only: gather the AI answers for the bundled sample resumes scored with the sample job's default JD and
     rules, plus the AI-drafted rules for that JD. Nothing else is exported, so no visitor upload can end up in it.
     Returns (snapshot, names of sample resumes that have no answer yet)."""
-    profile = sample_profiles()[SAMPLE_PROFILE_NAME]
     sample_dir = os.path.join(APP_DIR, "sample_resumes")
-    names = [name for name in DEMO_SAMPLE_RESUMES if os.path.exists(os.path.join(sample_dir, name))]
     cache, saved = demo_ai_cache(), demo_snapshot()
 
     def answer(key):
@@ -637,16 +684,23 @@ def build_demo_snapshot():
             return saved[key]
         return cache[key]["raw"] if key in cache else None
 
+    # Both languages go into the same file: the keys are content hashes, so they never collide.
     snapshot, missing = {}, []
-    for name in names:
-        key = scoring_cache_key(pdf_text(os.path.join(sample_dir, name)), profile["jd"], profile["rules"], SAMPLE_PROFILE_NAME)
-        if answer(key):
-            snapshot[key] = answer(key)
-        else:
-            missing.append(name)
-    rules_key = rules_cache_key(build_rules_prompt(profile["jd"]))
-    if answer(rules_key):
-        snapshot[rules_key] = answer(rules_key)
+    for lang, sample in SAMPLE_PROFILES.items():
+        name = sample["name"]
+        profile = sample_profiles(lang)[name]
+        for relative in DEMO_SAMPLE_RESUMES[lang]:
+            path = os.path.join(sample_dir, relative)
+            if not os.path.exists(path):
+                continue
+            key = scoring_cache_key(pdf_text(path), profile["jd"], profile["rules"], name, lang)
+            if answer(key):
+                snapshot[key] = answer(key)
+            else:
+                missing.append(relative)
+        rules_key = rules_cache_key(build_rules_prompt(profile["jd"], lang))
+        if answer(rules_key):
+            snapshot[rules_key] = answer(rules_key)
     return snapshot, missing
 
 
@@ -657,12 +711,17 @@ def parse_scoring_response(raw_text):
 
 def analyze_rules(rules_text):
     """Sanity checks on the free-text rules (see scoring.py), using this app's baseline and threshold."""
-    return _analyze_rules(rules_text, BASELINE_SCORE, SCORE_THRESHOLD)
+    messages = {
+        "no_points": t("warn_no_points"),
+        "no_deductions": t("warn_no_deductions"),
+        "never_rejected": t("warn_never_rejected", score="{score}", threshold="{threshold}"),
+    }
+    return _analyze_rules(rules_text, BASELINE_SCORE, SCORE_THRESHOLD, messages)
 
 
 def write_to_google_sheet(data_dict, real_resume_url):
     if sheet is None:
-        return "🛑 Sheet is not connected."
+        return t("sheet_not_connected")
     try:
         target_job = data_dict.get("job_applied", "").strip()
         target_email = data_dict.get("email", "").strip()
@@ -677,7 +736,7 @@ def write_to_google_sheet(data_dict, real_resume_url):
         existing_records = set(zip(all_jobs, all_emails))
 
         if (target_job, target_email) in existing_records:
-            return f"🛑 Duplicate blocked: {candidate_name} ({target_email}) already applied to this job; not written again."
+            return t("duplicate_blocked", name=candidate_name, email=target_email)
 
         # The code, not the model, decides the status so the status machine stays consistent.
         final_status = STATUS_PENDING_REJECTION if score < SCORE_THRESHOLD else STATUS_PENDING_REVIEW
@@ -700,19 +759,40 @@ def write_to_google_sheet(data_dict, real_resume_url):
 
         sheet.update(f"A{next_row}:E{next_row}", [front_part])
         sheet.update(f"H{next_row}:R{next_row}", [back_part])
-        return f"🚀 {candidate_name} written. Job: [{target_job}] / Status: [{final_status}]"
+        return t("write_ok", name=candidate_name, job=target_job, status=i18n.status_label(final_status))
 
     except Exception as e:
-        return f"❌ Fatal error while writing to the sheet: {e}"
+        return t("write_fatal", error=e)
 
 
 # Demo: a few bundled fictional resumes with different fits for the sample job, so visitors can try the
 # whole flow without downloading anything. Scores come from the AI and can vary slightly between runs.
+# Paths are relative to sample_resumes/; the Chinese interface offers Chinese resumes.
 DEMO_SAMPLE_RESUMES = {
-    "ariel_lin.pdf": "Ariel Lin · 4 yrs Python backend, cloud deployment",
-    "kevin_huang.pdf": "Kevin Huang · 2 yrs Python backend",
-    "mei-ling_wu.pdf": "Mei-Ling Wu · data assistant moving into backend",
+    "en": {
+        "ariel_lin.pdf": "Ariel Lin · 4 yrs Python backend, cloud deployment",
+        "kevin_huang.pdf": "Kevin Huang · 2 yrs Python backend",
+        "mei-ling_wu.pdf": "Mei-Ling Wu · data assistant moving into backend",
+    },
+    "zh": {
+        "zh/lin_ya-ting.pdf": "林雅婷 · 3 年 Python 後端經驗，期待薪資高於預算",
+        "zh/hung_chia-wei.pdf": "洪家瑋 · 1 年多網頁開發經驗",
+        "zh/gao_zi-hao.pdf": "高子豪 · 資管系應屆畢業",
+        "zh/chen_mei-ling.pdf": "陳美玲 · 精品零售，想轉職科技業",
+    },
 }
+
+
+def sample_resume_path(file_name):
+    """sample_resumes/-relative path of a bundled sample resume with this file name, or None."""
+    for samples in DEMO_SAMPLE_RESUMES.values():
+        for relative in samples:
+            if os.path.basename(relative) == file_name and os.path.exists(os.path.join(APP_DIR, "sample_resumes", relative)):
+                return relative
+    sample_dir = os.path.join(APP_DIR, "sample_resumes")
+    if os.path.isdir(sample_dir) and file_name in os.listdir(sample_dir):
+        return file_name
+    return None
 
 
 class BundledResume:
@@ -728,7 +808,7 @@ class BundledResume:
 
 
 @st.cache_data
-def sample_resume_preview(path):
+def sample_resume_preview(path, alt="First page of the sample resume"):
     """First page as an HTML image, so visitors can see what the AI is reading.
 
     Rendered at about twice the display width so it stays sharp on high-resolution (Retina) screens, and sent as
@@ -740,7 +820,7 @@ def sample_resume_preview(path):
     page_image.save(buffer, format="PNG", optimize=True)
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return (
-        f'<img src="data:image/png;base64,{encoded}" alt="First page of the sample resume" '
+        f'<img src="data:image/png;base64,{encoded}" alt="{alt}" '
         'style="width:100%; max-width:800px; border:1px solid #e0e0e0; border-radius:6px;">'
     )
 
@@ -779,53 +859,48 @@ def hours_until_rejection(applied_at_str):
 
 # ==================== Streamlit UI ====================
 
-st.title("👔 HRIS Recruiting Command Center")
+st.title(t("title"))
 if config.DEMO_MODE:
     if config.BOOKING_APP_URL:
-        st.link_button("📅 See the candidate side: interview booking page", config.BOOKING_APP_URL)
-    with st.expander("🛠️ Demo tools"):
-        st.caption(
-            f"Your private code is **{st.session_state.get('visitor_tag')}**. Only candidates tagged with it appear in "
-            "Manager Review and Email Routing. Keep this page's URL (it contains the code) to come back to them."
-        )
-        if st.button("🧹 Clear my candidates", key="clear_mine"):
+        st.link_button(t("see_candidate_side"), i18n.with_lang(config.BOOKING_APP_URL))
+    with st.expander(t("demo_tools")):
+        st.caption(t("private_code", tag=st.session_state.get("visitor_tag")))
+        if st.button(t("clear_mine"), key="clear_mine"):
             try:
                 removed = clear_my_candidates()
-                st.success(f"Removed {removed} of your candidate(s). Other visitors' data is untouched.")
+                st.success(t("cleared", count=removed))
             except Exception as clear_error:  # noqa: BLE001
-                st.error(f"Could not clear your candidates: {clear_error}")
+                st.error(t("clear_failed", error=clear_error))
         if is_demo_admin():
             st.divider()
-            st.caption("Owner only: this reloads the whole demo sheet.")
-            confirm_reset = st.checkbox("I understand this deletes every candidate in the demo sheet, for all visitors", key="confirm_reset")
-            if st.button("♻️ Reset demo data (all visitors)", disabled=not confirm_reset):
+            st.caption(t("owner_reset_note"))
+            confirm_reset = st.checkbox(t("confirm_reset"), key="confirm_reset")
+            if st.button(t("reset_all"), disabled=not confirm_reset):
                 try:
                     demo_housekeeping(force_reset=True)
                     st.session_state.df_dash = pd.DataFrame()
-                    st.success("Demo data reset: all candidates were removed and the sample candidates reloaded.")
+                    st.success(t("reset_done"))
                 except Exception as reset_error:  # noqa: BLE001
-                    st.error(f"Reset failed: {reset_error}")
+                    st.error(t("reset_failed", error=reset_error))
             st.divider()
-            st.caption(
-                "Owner only: save the AI answers for the sample resumes (default job and rules), so the default demo "
-                "keeps working when the free AI quota is used up."
-            )
+            st.caption(t("owner_snapshot_note"))
             snapshot, missing = build_demo_snapshot()
             if missing:
-                st.caption(
-                    "Not saved yet: " + ", ".join(missing) + ". Score them with the default rules first, then come back."
-                )
+                st.caption(t("not_saved_yet", names=", ".join(missing)))
             st.download_button(
-                f"💾 Export AI snapshot ({len(snapshot)} saved answer(s))",
+                t("export_snapshot", count=len(snapshot)),
                 data=json.dumps(snapshot, ensure_ascii=False, indent=2),
                 file_name="demo_ai_snapshot.json",
                 mime="application/json",
                 disabled=not snapshot,
             )
-            st.caption("Then upload the file to the repo as `sample_jd/demo_ai_snapshot.json`.")
-TAB_LABELS = ["📥 AI Resume Parsing", "👨‍💼 Manager Review", "📬 Email Routing", "📊 Analytics Dashboard"]
+            st.caption(t("upload_snapshot"))
+TAB_LABELS = [t("tab_parse"), t("tab_review"), t("tab_email"), t("tab_analytics")]
 TAB_REVIEW = TAB_LABELS[1]
 TAB_EMAIL = TAB_LABELS[2]
+if st.session_state.get("main_tab") not in (None, *TAB_LABELS):
+    # The language changed: the remembered tab label belongs to the other language.
+    st.session_state.pop("main_tab", None)
 
 
 def go_to_tab(label):
@@ -845,15 +920,12 @@ def go_to_email_tab():
 def evaluation_summary_text(summary):
     parts = []
     if summary["review"]:
-        parts.append(f"**{summary['review']}** candidate(s) scored {SCORE_THRESHOLD}+ and are waiting for a manager's decision")
+        parts.append(t("eval_review", count=summary["review"], threshold=SCORE_THRESHOLD))
     if summary["rejected"]:
-        parts.append(
-            f"**{summary['rejected']}** scored below {SCORE_THRESHOLD} and are in the \"Auto-rejected candidates\" list, "
-            "where the manager can read the AI's reasoning and move anyone back for review"
-        )
+        parts.append(t("eval_rejected", count=summary["rejected"], threshold=SCORE_THRESHOLD))
     if summary["problems"]:
-        parts.append(f"{len(summary['problems'])} could not be processed")
-    return "✅ Resume parsing finished: " + "; ".join(parts) + "."
+        parts.append(t("eval_problems", count=len(summary["problems"])))
+    return t("eval_done", parts=t("eval_sep").join(parts))
 
 
 tab1, tab2, tab3, tab4 = st.tabs(TAB_LABELS, key="main_tab", on_change="rerun")
@@ -862,7 +934,7 @@ tab1, tab2, tab3, tab4 = st.tabs(TAB_LABELS, key="main_tab", on_change="rerun")
 # Tab 1: AI resume parsing
 # ---------------------------------------------------------
 with tab1:
-    st.header("📥 AI Resume Parsing")
+    st.header(t("parse_header"))
 
     if "current_job_title" not in st.session_state:
         st.session_state.current_job_title = ""
@@ -874,15 +946,22 @@ with tab1:
     job_profiles = load_job_profiles()
     job_profile_names = list(job_profiles.keys())
 
-    # Demo: start with the sample job already loaded so visitors can score resumes immediately
-    if config.DEMO_MODE and not st.session_state.get("demo_profile_loaded"):
+    # Demo: start with the sample job already loaded so visitors can score resumes immediately.
+    # After a language switch, swap in the other language's sample job if the visitor was still on the sample.
+    loaded = st.session_state.get("demo_profile_loaded")
+    previous_sample = SAMPLE_PROFILES.get(loaded if loaded in SAMPLE_PROFILES else "en", {}).get("name")
+    still_on_sample = st.session_state.get("current_job_title") == previous_sample
+    if config.DEMO_MODE and (not loaded or (loaded != LANG and still_on_sample)):
         sample = job_profiles.get(SAMPLE_PROFILE_NAME)
         if sample:
             st.session_state.profile_selector = SAMPLE_PROFILE_NAME
             st.session_state.current_job_title = SAMPLE_PROFILE_NAME
             st.session_state.current_jd = sample["jd"]
             st.session_state.custom_rules = sample["rules"]
-        st.session_state.demo_profile_loaded = True
+    if config.DEMO_MODE:
+        st.session_state.demo_profile_loaded = LANG
+    if st.session_state.get("profile_selector") not in (None, NEW_JOB, *job_profile_names):
+        st.session_state.profile_selector = NEW_JOB
 
     def on_profile_change():
         selected = st.session_state.profile_selector
@@ -895,23 +974,24 @@ with tab1:
             st.session_state.current_jd = job_profiles[selected].get("jd", "")
             st.session_state.custom_rules = job_profiles[selected].get("rules", "")
 
-    st.markdown("### 🎯 Set the current opening")
+    st.markdown(t("set_opening"))
     st.selectbox(
-        "📂 Load a saved job profile:",
+        t("load_profile"),
         [NEW_JOB] + job_profile_names,
         key="profile_selector",
         on_change=on_profile_change,
+        format_func=option_label,
     )
     if st.session_state.get("profile_selector", NEW_JOB) != NEW_JOB:
-        st.button("🗑️ Delete this saved profile", on_click=delete_selected_profile)
-    st.text_input("Job title you are currently hiring for:", key="current_job_title")
+        st.button(t("delete_profile"), on_click=delete_selected_profile)
+    st.text_input(t("job_title_input"), key="current_job_title")
 
-    with st.expander("📝 Edit job requirements (JD) and AI scoring rules", expanded=True):
+    with st.expander(t("edit_jd_rules"), expanded=True):
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("### 📄 1. Job Description (JD)")
-            jd_file = st.file_uploader("Upload a JD PDF to extract its text (optional)", type=["pdf"], key="jd_upload")
+            st.markdown(t("jd_heading"))
+            jd_file = st.file_uploader(t("jd_upload"), type=["pdf"], key="jd_upload")
 
             if jd_file:
                 try:
@@ -921,46 +1001,51 @@ with tab1:
                             st.session_state.current_jd = extracted
                             st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Could not read the JD file: {e}")
+                    st.error(t("jd_read_failed", error=e))
 
-            st.text_area("Review or edit the JD text:", key="current_jd", height=350)
+            st.text_area(t("jd_edit"), key="current_jd", height=350)
 
-            if st.button("✨ Let AI draft 7-10 scoring rules from the JD", use_container_width=True):
+            if st.button(t("draft_rules"), use_container_width=True):
                 if st.session_state.current_jd.strip():
-                    with st.spinner("AI is analyzing the JD's keywords and screening criteria..."):
+                    with st.spinner(t("drafting_rules")):
                         new_rules = generate_rules_from_jd(st.session_state.current_jd)
                         st.session_state.custom_rules = new_rules
                         st.rerun()
                 else:
-                    st.warning("Upload or enter a JD first.")
+                    st.warning(t("need_jd"))
 
         with col2:
-            st.markdown("### ⚖️ 2. AI scoring and deduction rules")
+            st.markdown(t("rules_heading"))
             st.info(
-                "**How scoring works**\n\n"
-                f"- Every candidate starts at **{BASELINE_SCORE}** points. Your rules add or subtract from this; the final score is 0 to 100.\n"
-                f"- **Below {SCORE_THRESHOLD}:** automatic rejection email (sent {REJECTION_DELAY_HOURS} hours after applying). "
-                f"**{SCORE_THRESHOLD} or above:** goes to the hiring manager.\n"
-                f"- **Tip:** missing a required item should cost {RULE_GUIDE['required_miss'][0]} to {RULE_GUIDE['required_miss'][1]} points; "
-                f"minor gaps {RULE_GUIDE['minor_gap'][0]} to {RULE_GUIDE['minor_gap'][1]}; "
-                f"nice-to-have skills +{RULE_GUIDE['bonus'][0]} to +{RULE_GUIDE['bonus'][1]}."
+                t(
+                    "how_scoring_works",
+                    baseline=BASELINE_SCORE,
+                    threshold=SCORE_THRESHOLD,
+                    delay=REJECTION_DELAY_HOURS,
+                    req_lo=RULE_GUIDE["required_miss"][0],
+                    req_hi=RULE_GUIDE["required_miss"][1],
+                    minor_lo=RULE_GUIDE["minor_gap"][0],
+                    minor_hi=RULE_GUIDE["minor_gap"][1],
+                    bonus_lo=RULE_GUIDE["bonus"][0],
+                    bonus_hi=RULE_GUIDE["bonus"][1],
+                )
             )
-            st.caption("Type your own rules, or use the button on the left to have AI draft them in a clean format.")
+            st.caption(t("rules_tip"))
             st.text_area(
-                "Enter your evaluation and deduction logic:",
+                t("rules_input"),
                 key="custom_rules",
                 height=415,
-                placeholder="• Deduction: -15 if the candidate has no Python experience\n• Bonus: +5 for cloud deployment experience",
+                placeholder=t("rules_placeholder"),
             )
             rule_warnings, rules_have_points = analyze_rules(st.session_state.custom_rules) if st.session_state.custom_rules.strip() else ([], True)
             for warning_text in rule_warnings:
                 st.warning(warning_text)
 
         st.write("")
-        if st.button("💾 Save this job profile (JD + scoring rules)", type="secondary", use_container_width=True):
+        if st.button(t("save_profile"), type="secondary", use_container_width=True):
             job_name = st.session_state.current_job_title.strip()
             if not job_name:
-                st.error("⚠️ Enter a job title above before saving.")
+                st.error(t("need_job_title"))
             else:
                 existed = job_name in job_profiles
                 job_profiles[job_name] = {
@@ -968,66 +1053,70 @@ with tab1:
                     "rules": st.session_state.custom_rules,
                 }
                 save_job_profiles(job_profiles)
-                verb = "Updated the existing profile" if existed else "Saved the JD and scoring rules as the profile"
-                st.success(f"✅ {verb} \"{job_name}\". Load it from the dropdown next time.")
+                verb = t("profile_updated") if existed else t("profile_saved")
+                st.success(t("profile_saved_msg", verb=verb, name=job_name))
                 if config.DEMO_MODE:
-                    st.caption("Demo mode: saved profiles are kept only in your browser session.")
+                    st.caption(t("profile_session_only"))
 
     st.divider()
     sample_dir = os.path.join(APP_DIR, "sample_resumes")
-    sample_choices = {name: label for name, label in DEMO_SAMPLE_RESUMES.items() if os.path.exists(os.path.join(sample_dir, name))}
+    sample_choices = {
+        name: label for name, label in DEMO_SAMPLE_RESUMES[LANG].items() if os.path.exists(os.path.join(sample_dir, name))
+    }
 
+    # Internal values stay English; the labels follow the language.
     SAMPLE_SOURCE = "🧪 Use sample resumes"
     UPLOAD_SOURCE = "📥 Upload my own PDF resumes"
+    SOURCE_LABELS = {SAMPLE_SOURCE: "use_samples", UPLOAD_SOURCE: "upload_own"}
     resume_source = UPLOAD_SOURCE
     if config.DEMO_MODE and sample_choices:
-        st.markdown("### 📄 Resumes to evaluate")
+        st.markdown(t("resumes_heading"))
         resume_source = st.radio(
-            "Resumes to evaluate", [SAMPLE_SOURCE, UPLOAD_SOURCE], horizontal=True, key="resume_source",
-            label_visibility="collapsed",
+            t("resumes_label"), [SAMPLE_SOURCE, UPLOAD_SOURCE], horizontal=True, key="resume_source",
+            label_visibility="collapsed", format_func=lambda value: t(SOURCE_LABELS[value]),
         )
 
     if resume_source == SAMPLE_SOURCE:
-        st.caption(
-            "Fictional candidates with different fits for the sample Python Backend Engineer job, so you can see both "
-            "outcomes: some go to manager review and some are auto-rejected."
-        )
+        st.caption(t("samples_caption"))
         chosen_samples = st.pills(
-            "Sample resumes",
+            t("sample_resumes"),
             list(sample_choices),
             selection_mode="multi",
             default=list(sample_choices),
             format_func=lambda name: sample_choices[name],
-            key="chosen_samples",
+            # One key per language: the two languages offer different files.
+            key="chosen_samples" if LANG == "en" else f"chosen_samples_{LANG}",
             label_visibility="collapsed",
         ) or []
         for name in chosen_samples:
-            with st.expander(f"👀 Preview: {sample_choices[name]}"):
-                st.markdown(sample_resume_preview(os.path.join(sample_dir, name)), unsafe_allow_html=True)
-                st.markdown(f"[📄 Open the original PDF]({config.REPO_URL}/blob/main/sample_resumes/{name})")
+            with st.expander(t("preview", label=sample_choices[name])):
+                st.markdown(
+                    sample_resume_preview(os.path.join(sample_dir, name), t("resume_preview_alt")), unsafe_allow_html=True
+                )
+                st.markdown(t("open_pdf", url=f"{config.REPO_URL}/blob/main/sample_resumes/{name}"))
         uploaded_files = [BundledResume(os.path.join(sample_dir, name)) for name in chosen_samples]
     else:
         uploaded_files = st.file_uploader(
-            "📥 Upload candidate resumes (multiple files allowed)", type=["pdf"], accept_multiple_files=True
+            t("upload_resumes"), type=["pdf"], accept_multiple_files=True
         )
 
-    if st.button("🚀 Start AI evaluation", type="primary", use_container_width=True):
+    if st.button(t("start_eval"), type="primary", use_container_width=True):
         if not uploaded_files:
-            st.warning("⚠️ Choose or upload at least one resume first.")
+            st.warning(t("need_resume"))
         elif (
             not st.session_state.current_jd.strip()
             or not st.session_state.custom_rules.strip()
             or not st.session_state.current_job_title.strip()
         ):
-            st.warning("⚠️ Job title, JD and scoring rules must not be empty.")
+            st.warning(t("need_fields"))
         elif not analyze_rules(st.session_state.custom_rules)[1]:
-            st.warning("⚠️ The scoring rules contain no point values (such as -15 or +5), so scores cannot be computed. Please fix the rules first.")
+            st.warning(t("need_points"))
         else:
             st.session_state.pop("evaluation_summary", None)
             outcome = {"review": 0, "rejected": 0, "problems": []}
-            with st.status("🤖 AI interviewer starting...", expanded=True) as status:
+            with st.status(t("ai_starting"), expanded=True) as status:
                 for file in uploaded_files:
-                    st.write(f"Processing: {file.name}...")
+                    st.write(t("processing", name=file.name))
 
                     temp_path = f"temp_{file.name}"
                     with open(temp_path, "wb") as f:
@@ -1045,9 +1134,9 @@ with tab1:
                         st.session_state.current_job_title,
                     ) in demo_snapshot()
                     if saved_answer:
-                        st.write(f"📦 Using the saved AI result for {file.name} (sample resume with the default rules)")
+                        st.write(t("using_saved", name=file.name))
                     else:
-                        st.write(f"🧠 AI is analyzing {file.name} in depth...")
+                        st.write(t("analyzing", name=file.name))
 
                     result_json, is_ok = score_resume(
                         file.name,
@@ -1070,12 +1159,12 @@ with tab1:
                                 outcome["review" if data_dict.get("score", 0) >= SCORE_THRESHOLD else "rejected"] += 1
 
                         except ValueError as parse_error:
-                            st.error(f"❌ The AI response for {file.name} was unusable and was NOT written: {parse_error}")
-                            with st.expander("🔍 View the raw response"):
+                            st.error(t("unusable", name=file.name, error=parse_error))
+                            with st.expander(t("raw_response")):
                                 st.code(result_json)
-                            outcome["problems"].append(f"{file.name}: the AI response was unusable and was NOT written")
+                            outcome["problems"].append(t("unusable_short", name=file.name))
                     else:
-                        st.error(f"❌ Evaluation of {file.name} failed: {result_json}")
+                        st.error(t("eval_failed", name=file.name, error=result_json))
                         outcome["problems"].append(f"{file.name}: {result_json}")
 
                     if os.path.exists(temp_path):
@@ -1083,7 +1172,7 @@ with tab1:
 
                 # Keep the log open when something failed, so the error messages stay visible
                 status.update(
-                    label="✅ All resumes evaluated!" if not outcome["problems"] else "⚠️ Evaluation finished with problems",
+                    label=t("all_evaluated") if not outcome["problems"] else t("eval_with_problems"),
                     state="complete" if not outcome["problems"] else "error",
                     expanded=bool(outcome["problems"]),
                 )
@@ -1096,28 +1185,23 @@ with tab1:
     if summary:
         if summary["review"] or summary["rejected"]:
             st.success(evaluation_summary_text(summary))
-            st.button("👉 Go to Manager Review", type="primary", on_click=go_to_review_tab, key="go_to_review")
+            st.button(t("go_review"), type="primary", on_click=go_to_review_tab, key="go_to_review")
         else:
-            st.warning("⚠️ No resume could be processed. See the messages above.")
+            st.warning(t("none_processed"))
 
 # ---------------------------------------------------------
 # Tab 2: Manager review
 # ---------------------------------------------------------
 with tab2:
-    st.header("👨‍💼 Manager Review Board")
+    st.header(t("review_header"))
     summary = st.session_state.get("evaluation_summary")
     if summary and (summary["review"] or summary["rejected"]):
         st.success(evaluation_summary_text(summary))
         if summary["problems"]:
-            with st.expander("⚠️ Resumes that could not be processed"):
+            with st.expander(t("not_processed")):
                 for problem in summary["problems"]:
                     st.warning(problem)
-    st.info(
-        f"💡 **How review works**\n\nResumes the AI scored {SCORE_THRESHOLD} or higher appear here for the hiring manager, "
-        "plus any lower-scoring candidate you move back from the auto-rejected list below. "
-        "Tick the box to invite a candidate to interview. If the candidate is not a fit, leave the box unticked and "
-        "**always write the reason in the comment column**, so HR can analyze the funnel and adjust the hiring strategy."
-    )
+    st.info(t("how_review_works", threshold=SCORE_THRESHOLD))
 
     if sheet:
         all_rows = sheet.get_all_values()
@@ -1127,17 +1211,19 @@ with tab2:
             )
 
             if not all_job_titles:
-                st.success("🎉 There is no data in the sheet yet.")
+                st.success(t("no_data_yet"))
             else:
                 col_filter, col_btn = st.columns([3, 1])
                 with col_filter:
+                    if st.session_state.get("filter_tab2") not in (None, ALL_JOBS, *all_job_titles):
+                        st.session_state.pop("filter_tab2", None)
                     selected_job_tab2 = st.selectbox(
-                        "🎯 Choose the job to review:", [ALL_JOBS] + all_job_titles, key="filter_tab2"
+                        t("choose_job_review"), [ALL_JOBS] + all_job_titles, key="filter_tab2", format_func=option_label
                     )
                 with col_btn:
                     st.write("")
                     st.write("")
-                    if st.button("🔄 Reload list", key="reload_sheet_tab2"):
+                    if st.button(t("reload"), key="reload_sheet_tab2"):
                         st.rerun()
 
                 # One table per job (the job is shown as a heading, not repeated in every row).
@@ -1170,22 +1256,22 @@ with tab2:
                     # the long AI text columns go last and expand on click.
                     review_columns = {
                         "Sheet_Row": None,
-                        "Name": st.column_config.TextColumn("Name", width="medium"),
-                        "AI Score": st.column_config.NumberColumn("Score", width="small"),
+                        "Name": st.column_config.TextColumn(t("col_name"), width="medium"),
+                        "AI Score": st.column_config.NumberColumn(t("col_score"), width="small"),
                         "✅ Approve Interview": st.column_config.CheckboxColumn(
-                            "✅ Invite", default=False, width="small", help="Tick to invite this candidate to interview"
+                            t("col_invite"), default=False, width="small", help=t("col_invite_help")
                         ),
                         "📝 Manager Comment": st.column_config.TextColumn(
-                            "📝 Comment", width="medium", help="Required when you do not invite: the reason feeds the analytics"
+                            t("col_comment"), width="medium", help=t("col_comment_help")
                         ),
-                        "Resume": st.column_config.LinkColumn("Resume", display_text="📄 Open", width="small"),
-                        "AI Rationale": st.column_config.TextColumn("AI rationale (click to expand)", width="medium"),
-                        "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="medium"),
+                        "Resume": st.column_config.LinkColumn(t("col_resume"), display_text=t("col_open"), width="small"),
+                        "AI Rationale": st.column_config.TextColumn(t("col_rationale"), width="medium"),
+                        "Score arithmetic": st.column_config.TextColumn(t("col_arithmetic"), width="medium"),
                     }
                     review_tables = []
                     for job_title_in_sheet in sorted(review_by_job):
                         rows_for_job = review_by_job[job_title_in_sheet]
-                        st.markdown(f"#### 💼 {job_title_in_sheet} · {len(rows_for_job)} candidate(s)")
+                        st.markdown(t("job_candidates", job=job_title_in_sheet, count=len(rows_for_job)))
                         df = pd.DataFrame(rows_for_job)
                         edited_df = st.data_editor(
                             df,
@@ -1197,8 +1283,8 @@ with tab2:
                         )
                         review_tables.append((df, edited_df))
 
-                    if st.button("💾 Save review decisions and sync to the cloud", type="primary"):
-                        with st.spinner("Syncing the manager's decisions to Google Sheets..."):
+                    if st.button(t("save_review"), type="primary"):
+                        with st.spinner(t("syncing_review")):
                             update_count = 0
                             for df, edited_df in review_tables:
                                 for i in range(len(df)):
@@ -1219,16 +1305,13 @@ with tab2:
                                 st.session_state.review_saved = update_count
                                 st.rerun()
                             else:
-                                st.info("No changes to save.")
+                                st.info(t("no_changes"))
                 else:
-                    st.info(f"👉 No resumes are waiting for manager review under \"{selected_job_tab2}\".")
+                    st.info(t("no_waiting", job=option_label(selected_job_tab2)))
 
                 if st.session_state.get("review_saved"):
-                    st.success(
-                        f"✅ Saved {st.session_state.review_saved} review decision(s). Next, send the interview invitations "
-                        "and rejection notes in Email Routing."
-                    )
-                    st.button("👉 Go to Email Routing", type="primary", on_click=go_to_email_tab, key="go_to_email")
+                    st.success(t("review_saved", count=st.session_state.review_saved))
+                    st.button(t("go_email"), type="primary", on_click=go_to_email_tab, key="go_to_email")
 
                 # ---- Safety net: let the manager look at AI-rejected candidates and move them back ----
                 st.divider()
@@ -1257,34 +1340,30 @@ with tab2:
                 rescue_count = sum(len(rows_for_job) for rows_for_job in rescue_by_job.values())
 
                 with st.expander(
-                    f"🔎 Auto-rejected candidates (score below {SCORE_THRESHOLD}, rejection email not sent yet): {rescue_count}",
+                    t("rescue_expander", threshold=SCORE_THRESHOLD, count=rescue_count),
                     # Open it right after parsing produced new rejections, so they are not missed
                     expanded=bool(summary and summary["rejected"]),
                 ):
-                    st.caption(
-                        f"The AI rejected these candidates. Their rejection email is sent {REJECTION_DELAY_HOURS} hours after they "
-                        "applied, so until then you can read the AI's reasoning and move anyone back to the review board above. "
-                        "Once the email is sent, the decision is final."
-                    )
+                    st.caption(t("rescue_caption", delay=REJECTION_DELAY_HOURS))
                     if rescue_by_job:
                         rescue_columns = {
                             "Sheet_Row": None,
-                            "Name": st.column_config.TextColumn("Name", width="medium"),
-                            "AI Score": st.column_config.NumberColumn("Score", width="small"),
+                            "Name": st.column_config.TextColumn(t("col_name"), width="medium"),
+                            "AI Score": st.column_config.NumberColumn(t("col_score"), width="small"),
                             "↩️ Move back to review": st.column_config.CheckboxColumn(
-                                "↩️ Move back", default=False, width="small", help="Tick to send this candidate to the review board above"
+                                t("col_move_back"), default=False, width="small", help=t("col_move_back_help")
                             ),
-                            "Resume": st.column_config.LinkColumn("Resume", display_text="📄 Open", width="small"),
-                            "AI Rationale": st.column_config.TextColumn("AI rationale (click to expand)", width="medium"),
-                            "Score arithmetic": st.column_config.TextColumn("Score arithmetic (click to expand)", width="medium"),
+                            "Resume": st.column_config.LinkColumn(t("col_resume"), display_text=t("col_open"), width="small"),
+                            "AI Rationale": st.column_config.TextColumn(t("col_rationale"), width="medium"),
+                            "Score arithmetic": st.column_config.TextColumn(t("col_arithmetic"), width="medium"),
                             "Hours left": st.column_config.NumberColumn(
-                                "⏳ Hours left", format="%d", width="small", help="Hours until the rejection email is sent"
+                                t("col_hours_left"), format="%d", width="small", help=t("col_hours_left_help")
                             ),
                         }
                         rescue_tables = []
                         for job_title_in_sheet in sorted(rescue_by_job):
                             rows_for_job = rescue_by_job[job_title_in_sheet]
-                            st.markdown(f"**💼 {job_title_in_sheet} · {len(rows_for_job)} candidate(s)**")
+                            st.markdown(t("job_candidates_small", job=job_title_in_sheet, count=len(rows_for_job)))
                             rescue_tables.append(
                                 st.data_editor(
                                     pd.DataFrame(rows_for_job),
@@ -1295,21 +1374,21 @@ with tab2:
                                     use_container_width=True,
                                 )
                             )
-                        if st.button("↩️ Move selected candidates back to manager review", key="rescue_btn"):
+                        if st.button(t("move_back"), key="rescue_btn"):
                             chosen = [
                                 row_idx
                                 for redited in rescue_tables
                                 for row_idx in redited.loc[redited["↩️ Move back to review"], "Sheet_Row"].tolist()
                             ]
                             if not chosen:
-                                st.info("Tick at least one candidate first.")
+                                st.info(t("tick_one"))
                             else:
-                                with st.spinner("Updating Google Sheets..."):
+                                with st.spinner(t("updating_sheet")):
                                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
                                     for row_idx in chosen:
                                         sheet.update_cell(int(row_idx), 1, STATUS_PENDING_REVIEW)
                                         sheet.update_cell(int(row_idx), 9, now_str)
-                                st.success(f"✅ Moved {len(chosen)} candidate(s) back to the review board.")
+                                st.success(t("moved_back", count=len(chosen)))
                                 st.session_state.pop("evaluation_summary", None)
                                 for job_title_in_sheet in rescue_by_job:
                                     # drop stale cell edits before the rows change
@@ -1317,27 +1396,27 @@ with tab2:
                                 time.sleep(1)
                                 st.rerun()
                     else:
-                        st.caption("No auto-rejected candidates are waiting right now.")
+                        st.caption(t("no_rejected"))
         else:
-            st.success("🎉 No resumes need manager review right now.")
+            st.success(t("nothing_to_review"))
 
 # ---------------------------------------------------------
 # Tab 3: Email routing
 # ---------------------------------------------------------
 with tab3:
-    st.header("📬 Automated Email Routing")
+    st.header(t("email_header"))
 
     if config.DEMO_MODE and st.session_state.get("demo_emails"):
         previews = st.session_state.demo_emails
-        with st.expander(f"📧 Demo email previews: {len(previews)} email(s), NOT actually sent", expanded=True):
+        with st.expander(t("email_previews", count=len(previews)), expanded=True):
             for i, mail in enumerate(previews, start=1):
-                st.markdown(f"**{i}. To:** {mail['to']}  \n**Subject:** {mail['subject']}")
+                st.markdown(t("preview_to", n=i, to=mail["to"], subject=mail["subject"]))
                 if "<br>" in mail["body"]:
                     st.markdown(mail["body"], unsafe_allow_html=True)
                 else:
                     st.text(mail["body"])
                 st.divider()
-            if st.button("Clear previews", key="clear_demo_emails"):
+            if st.button(t("clear_previews"), key="clear_demo_emails"):
                 st.session_state.demo_emails = []
                 st.rerun()
 
@@ -1351,8 +1430,10 @@ with tab3:
 
             col_filter3, col_empty = st.columns([3, 1])
             with col_filter3:
+                if st.session_state.get("filter_tab3") not in (None, ALL_JOBS, *all_job_titles_tab3):
+                    st.session_state.pop("filter_tab3", None)
                 selected_job_tab3 = st.selectbox(
-                    "🎯 Choose the job to view or send emails for:", [ALL_JOBS] + all_job_titles_tab3, key="filter_tab3"
+                    t("choose_job_email"), [ALL_JOBS] + all_job_titles_tab3, key="filter_tab3", format_func=option_label
                 )
 
             current_time = datetime.now()
@@ -1376,69 +1457,70 @@ with tab3:
                     continue
 
                 if status == STATUS_PENDING_REJECTION:
-                    time_info = " (could not parse application time)"
+                    time_info = t("time_unparsed")
                     try:
                         applied_time = datetime.strptime(applied_at_str, "%Y-%m-%d %H:%M")
                         target_send_time = applied_time + timedelta(hours=REJECTION_DELAY_HOURS)
                         time_diff = target_send_time - current_time
 
                         if time_diff.total_seconds() <= 0:
-                            time_info = f" 🔴 ({REJECTION_DELAY_HOURS} hours elapsed, will send immediately)"
+                            time_info = t("time_elapsed", hours=REJECTION_DELAY_HOURS)
                         else:
                             days = time_diff.days
                             hours = time_diff.seconds // 3600
                             if days > 0:
-                                time_info = f" ⏳ ({days}d {hours}h until send)"
+                                time_info = t("time_days", days=days, hours=hours)
                             else:
-                                time_info = f" ⏳ ({hours}h until send)"
+                                time_info = t("time_hours", hours=hours)
                     except ValueError:
                         pass
-                    names_reject.append(f"• {name} {time_info} [applied: {job_title}]")
+                    names_reject.append(t("queued_line", name=name, info=time_info, job=job_title))
 
                 elif status == STATUS_PENDING_REVIEW and manager_approve_str == "TRUE":
-                    names_pending_invite.append(f"• {name} [applied: {job_title}]")
+                    names_pending_invite.append(t("queued_line_plain", name=name, job=job_title))
 
                 elif status == STATUS_PENDING_REVIEW and manager_approve_str == "FALSE" and manager_comment != "":
-                    names_manager_reject.append(f"• {name} [applied: {job_title}]")
+                    names_manager_reject.append(t("queued_line_plain", name=name, job=job_title))
 
             col1, col2, col3 = st.columns(3)
-            col1.metric("Queued: AI rejection emails", len(names_reject))
-            col2.metric("Queued: manager-approved interview invites", len(names_pending_invite))
-            col3.metric("Queued: manager rejection emails", len(names_manager_reject))
+            col1.metric(t("q_ai_reject"), len(names_reject))
+            col2.metric(t("q_invite"), len(names_pending_invite))
+            col3.metric(t("q_mgr_reject"), len(names_manager_reject))
 
             st.write("")
             col1_list, col2_list, col3_list = st.columns(3)
             for column, names in ((col1_list, names_reject), (col2_list, names_pending_invite), (col3_list, names_manager_reject)):
                 with column:
-                    st.markdown("**📄 Candidates who will receive this email:**")
+                    st.markdown(t("who_receives"))
                     if names:
                         for n in names:
                             st.write(n)
                     else:
-                        st.caption("Nobody is queued")
+                        st.caption(t("nobody_queued"))
 
             st.divider()
 
             skip_wait = False
             if config.DEMO_MODE:
                 skip_wait = st.checkbox(
-                    f"Demo only: skip the {REJECTION_DELAY_HOURS}-hour wait so automatic rejection emails are sent now",
+                    t("skip_wait", hours=REJECTION_DELAY_HOURS),
                     key="demo_skip_wait",
                 )
 
             if st.button(
-                f"⚡ Run the email state machine (send emails for \"{selected_job_tab3}\")",
+                t("run_machine", job=option_label(selected_job_tab3)),
                 type="primary",
                 use_container_width=True,
             ):
                 if not config.DEMO_MODE and (not SENDER_EMAIL or GMAIL_APP_PASSWORD == "YOUR_16_DIGIT_PASSWORD"):
-                    st.error("⚠️ Real email credentials are not configured, so no emails can be sent.")
+                    st.error(t("no_credentials"))
                 elif not config.BOOKING_APP_URL:
-                    st.error("⚠️ BOOKING_APP_URL is not configured. Interview invites need the public booking-page URL.")
+                    st.error(t("no_booking_url"))
                 else:
-                    with st.status("📬 Email dispatch engine running...", expanded=True) as log_status:
+                    with st.status(t("engine_running"), expanded=True) as log_status:
                         try:
                             yag = DemoMailer() if config.DEMO_MODE else yagmail.SMTP(user=SENDER_EMAIL, password=GMAIL_APP_PASSWORD)
+                            company = config.company_name(LANG)
                             trigger_count = 0
                             delay_hours = 0 if skip_wait else REJECTION_DELAY_HOURS
 
@@ -1471,16 +1553,14 @@ with tab3:
                                         is_past_delay = False
 
                                     if is_past_delay:
-                                        st.write(f"⚡ [Auto rejection] Sending a thank-you email to {name}...")
-                                        subject = f"[{COMPANY_NAME}] Update on your application for \"{job_title}\""
-                                        body = (
-                                            f"Dear {name},\n\n"
-                                            f"Thank you for your interest in the \"{job_title}\" position at {COMPANY_NAME.rstrip('.')}. "
-                                            "After an initial review, and given the large number of applicants, we found that your "
-                                            "background is not a close enough match with the specific technical stack our team "
-                                            "currently needs, so we are unable to move forward with an interview at this time. "
-                                            "We wish you every success in your career and hope our paths cross again.\n\n"
-                                            f"Sincerely,\nThe {COMPANY_NAME} Recruiting Team"
+                                        st.write(t("log_auto_reject", name=name))
+                                        subject = t("mail_reject_subject", company=company, job=job_title)
+                                        body = t(
+                                            "mail_auto_reject_body",
+                                            name=name,
+                                            job=job_title,
+                                            company=company,
+                                            company_short=company.rstrip("."),
                                         )
                                         yag.send(to=email, subject=subject, contents=body)
 
@@ -1490,23 +1570,24 @@ with tab3:
                                         time.sleep(1)
 
                                 elif status == STATUS_PENDING_REVIEW and manager_approve_str == "TRUE":
-                                    st.write(f"🚀 [Manager approved] Sending an interview invitation to {name}...")
-                                    subject = f"[Interview Invitation] {COMPANY_NAME} - \"{job_title}\" team interview"
+                                    st.write(t("log_invite", name=name))
+                                    subject = t("mail_invite_subject", company=company, job=job_title)
                                     booking_params = {"name": name, "email": email}
                                     if config.DEMO_MODE:
                                         # Lets the demo booking page list this visitor's own invited candidates
                                         booking_params["v"] = st.session_state.get("visitor_tag", "")
+                                    if LANG == "zh":
+                                        # The candidate gets the booking page in the language of the invitation
+                                        booking_params["lang"] = "zh"
                                     booking_url = f"{config.BOOKING_APP_URL}?{urlencode(booking_params)}"
-                                    body = f"""Dear {name},<br><br>
-Thank you for applying for the "{job_title}" position at {COMPANY_NAME.rstrip('.')}. After a careful review of your background, the hiring manager would like to invite you to the next stage: an online interview!<br><br>
-To fit around the technical managers' schedules, we built a self-service booking page. It shows all of their open time slots for the next three weeks, synced in real time.<br><br>
-👇 <b>Click the link below and choose one open slot to book your interview:</b><br>
-<a href="{booking_url}" style="font-size: 16px; font-weight: bold; color: #1a73e8;">Open the interview booking page</a><br><br>
-<span style="color: gray; font-size: 12px;">
-💡 Tip: popular slots fill up quickly, so we recommend booking within 24 hours of receiving this email. Once you book, a confirmation email with the meeting details will be sent to your inbox right away. We look forward to meeting you!<br><br>
-Sincerely,<br>The {COMPANY_NAME} Recruiting Team
-</span>
-"""
+                                    body = t(
+                                        "mail_invite_body",
+                                        name=name,
+                                        job=job_title,
+                                        company=company,
+                                        company_short=company.rstrip("."),
+                                        url=booking_url,
+                                    )
                                     yag.send(to=email, subject=subject, contents=body)
                                     sheet.update_cell(idx, 1, STATUS_INVITED_NO_REPLY)
                                     sheet.update_cell(idx, 9, current_time.strftime("%Y-%m-%d %H:%M"))
@@ -1514,16 +1595,14 @@ Sincerely,<br>The {COMPANY_NAME} Recruiting Team
                                     time.sleep(1)
 
                                 elif status == STATUS_PENDING_REVIEW and manager_approve_str == "FALSE" and manager_comment != "":
-                                    st.write(f"📝 [Manager declined] Sending a thank-you email to {name}...")
-                                    subject = f"[{COMPANY_NAME}] Update on your application for \"{job_title}\""
-                                    body = (
-                                        f"Dear {name},\n\n"
-                                        f"Thank you for applying for the \"{job_title}\" position at {COMPANY_NAME.rstrip('.')}. "
-                                        "Your résumé is strong; however, after review by the hiring manager, we felt your fit with "
-                                        "our current technical stack or salary expectations is not quite aligned with this role, "
-                                        "so we are unable to arrange an interview this time. Thank you again for applying, and we "
-                                        "hope to work with you in the future!\n\n"
-                                        f"Sincerely,\nThe {COMPANY_NAME} Recruiting Team"
+                                    st.write(t("log_mgr_reject", name=name))
+                                    subject = t("mail_reject_subject", company=company, job=job_title)
+                                    body = t(
+                                        "mail_mgr_reject_body",
+                                        name=name,
+                                        job=job_title,
+                                        company=company,
+                                        company_short=company.rstrip("."),
                                     )
                                     yag.send(to=email, subject=subject, contents=body)
 
@@ -1533,30 +1612,27 @@ Sincerely,<br>The {COMPANY_NAME} Recruiting Team
                                     time.sleep(1)
 
                             log_status.update(
-                                label=f"🎉 Done! {trigger_count} email(s) sent.", state="complete", expanded=True
+                                label=t("engine_done", count=trigger_count), state="complete", expanded=True
                             )
                             time.sleep(1)
                             st.rerun()
                         except Exception as e:
-                            st.error(f"❌ The email dispatch engine crashed: {e}")
+                            st.error(t("engine_crashed", error=e))
         else:
-            st.info("There is no data to send emails for yet.")
+            st.info(t("no_email_data"))
 
 # ---------------------------------------------------------
 # Tab 4: Analytics dashboard
 # ---------------------------------------------------------
 with tab4:
-    st.header("📊 Applicant Analytics and Hiring Decision Report")
+    st.header(t("analytics_header"))
     if config.DEMO_MODE:
-        st.caption(
-            "Demo data: about 40 fictional sample candidates plus the candidates visitors uploaded in the last 24 hours. "
-            "Unlike the review and routing tabs, this report is not limited to your own candidates."
-        )
+        st.caption(t("analytics_demo"))
 
     col_dash_load, col_dash_empty = st.columns([1, 3])
     with col_dash_load:
-        if st.button("🔄 Sync cloud data and load analytics", type="primary"):
-            with st.spinner("Fetching the latest data from Google Sheets..."):
+        if st.button(t("sync_analytics"), type="primary"):
+            with st.spinner(t("fetching")):
                 if sheet:
                     raw_vals = sheet.get_all_values()
                     if len(raw_vals) > 1:
@@ -1564,11 +1640,11 @@ with tab4:
                         header = raw_vals[0] + [f"extra_{i}" for i in range(len(raw_vals[0]), width)]
                         body = [r + [""] * (width - len(r)) for r in raw_vals[1:]]
                         st.session_state.df_dash = pd.DataFrame(body, columns=header)
-                        st.success("✅ Data synced.")
+                        st.success(t("synced"))
                     else:
-                        st.warning("There is no recruiting data in the sheet yet.")
+                        st.warning(t("no_recruiting_data"))
                 else:
-                    st.error("🛑 Sheet is not connected.")
+                    st.error(t("sheet_not_connected"))
 
     if not st.session_state.df_dash.empty:
         df_dash = st.session_state.df_dash.copy()
@@ -1588,12 +1664,17 @@ with tab4:
             st.divider()
 
             ALL = "All"
+            TIME_LABELS = {ALL: "all", "Last week": "last_week", "Last 3 weeks": "last_3_weeks"}
             c_f1, c_f2 = st.columns(2)
             with c_f1:
                 dash_job_list = [ALL] + list(df_dash["job_applied"].dropna().unique())
-                sel_dash_job = st.selectbox("🎯 Filter by job", dash_job_list)
+                sel_dash_job = st.selectbox(
+                    t("filter_job"), dash_job_list, format_func=lambda value: t("all") if value == ALL else value
+                )
             with c_f2:
-                sel_dash_time = st.radio("⏰ Time window", [ALL, "Last week", "Last 3 weeks"], horizontal=True)
+                sel_dash_time = st.radio(
+                    t("time_window"), list(TIME_LABELS), horizontal=True, format_func=lambda value: t(TIME_LABELS[value])
+                )
 
             if sel_dash_job != ALL:
                 df_dash = df_dash[df_dash["job_applied"] == sel_dash_job]
@@ -1611,13 +1692,13 @@ with tab4:
                 t_hire = len(df_dash[df_dash["status"] == STATUS_HIRED])
 
                 ck1, ck2, ck3 = st.columns(3)
-                ck1.metric("👥 Total applicants", f"{t_app}")
+                ck1.metric(t("k_total"), f"{t_app}")
                 ck2.metric(
-                    "✉️ Reached interview stage",
+                    t("k_interview"),
                     f"{t_inv}",
-                    f"Overall conversion: {int(t_inv / t_app * 100) if t_app > 0 else 0}%",
+                    t("k_conversion", pct=int(t_inv / t_app * 100) if t_app > 0 else 0),
                 )
-                ck3.metric("🎉 Hired", f"{t_hire}", f"Hire rate: {int(t_hire / t_app * 100) if t_app > 0 else 0}%")
+                ck3.metric(t("k_hired"), f"{t_hire}", t("k_hire_rate", pct=int(t_hire / t_app * 100) if t_app > 0 else 0))
 
                 st.divider()
 
@@ -1643,15 +1724,16 @@ with tab4:
                     exp_df["rate"] = (exp_df["sum"] / exp_df["count"] * 100).fillna(0).round(1)
 
                     fig_exp = make_subplots(specs=[[{"secondary_y": True}]])
+                    band_names = [i18n.band_label(band) for band in exp_df.index]
                     fig_exp.add_trace(
-                        go.Bar(x=exp_df.index, y=exp_df["count"], name="Applicants", marker_color=UI_THEME["PRIMARY"]),
+                        go.Bar(x=band_names, y=exp_df["count"], name=t("c_applicants"), marker_color=UI_THEME["PRIMARY"]),
                         secondary_y=False,
                     )
                     fig_exp.add_trace(
                         go.Scatter(
-                            x=exp_df.index,
+                            x=band_names,
                             y=exp_df["rate"],
-                            name="Interview conversion (%)",
+                            name=t("c_conversion_pct"),
                             mode="lines+markers",
                             marker=dict(size=10, color=UI_THEME["WARNING"]),
                             line=dict(width=3),
@@ -1660,13 +1742,13 @@ with tab4:
                     )
 
                     fig_exp.update_layout(
-                        title="<b>Applicants and interview conversion by experience</b>",
+                        title=t("c_exp_title"),
                         plot_bgcolor="rgba(0,0,0,0)",
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     )
-                    fig_exp.update_yaxes(title_text="Applicants", secondary_y=False)
+                    fig_exp.update_yaxes(title_text=t("c_applicants"), secondary_y=False)
                     fig_exp.update_yaxes(
-                        title_text="Conversion (%)", secondary_y=True, range=[0, max(100, exp_df["rate"].max() + 10)]
+                        title_text=t("c_conversion_axis"), secondary_y=True, range=[0, max(100, exp_df["rate"].max() + 10)]
                     )
                     st.plotly_chart(fig_exp, use_container_width=True)
 
@@ -1681,7 +1763,7 @@ with tab4:
                         fig_reason = go.Figure(
                             data=[
                                 go.Pie(
-                                    labels=reason_counts.index,
+                                    labels=[i18n.reason_label(reason) for reason in reason_counts.index],
                                     values=reason_counts.values,
                                     hole=0.5,
                                     marker=dict(
@@ -1692,10 +1774,10 @@ with tab4:
                                 )
                             ]
                         )
-                        fig_reason.update_layout(title="<b>Why candidates drop out of the funnel</b>", showlegend=False)
+                        fig_reason.update_layout(title=t("c_reason_title"), showlegend=False)
                         st.plotly_chart(fig_reason, use_container_width=True)
                     else:
-                        st.info("No rejection data to analyze yet.")
+                        st.info(t("no_rejections"))
 
                 st.divider()
 
@@ -1712,14 +1794,14 @@ with tab4:
                             mode="markers",
                             text=df_dash["name"],
                             marker=dict(size=12, color=UI_THEME["SECONDARY"], opacity=0.7, line=dict(width=1, color="white")),
-                            hovertemplate="<b>%{text}</b><br>AI score: %{x}<br>Expected salary: %{y:,.0f}<extra></extra>",
+                            hovertemplate=t("c_hover"),
                         )
                     )
                     fig_scatter.update_layout(
-                        title="<b>AI score vs. expected salary</b>",
+                        title=t("c_scatter_title"),
                         plot_bgcolor="rgba(0,0,0,0)",
-                        xaxis_title="Overall AI score (0-100)",
-                        yaxis_title="Expected monthly salary (TWD)",
+                        xaxis_title=t("c_score_axis"),
+                        yaxis_title=t("c_salary_axis"),
                     )
                     st.plotly_chart(fig_scatter, use_container_width=True)
 
@@ -1744,7 +1826,7 @@ with tab4:
                         go.Bar(
                             x=top_skills["skills_extracted"],
                             y=top_skills["Count"],
-                            name="Candidates with skill",
+                            name=t("c_with_skill"),
                             marker_color=UI_THEME["SKILL_BAR_COLOR"],
                         ),
                         secondary_y=False,
@@ -1753,7 +1835,7 @@ with tab4:
                         go.Scatter(
                             x=top_skills["skills_extracted"],
                             y=top_skills["AvgSalary"],
-                            name="Avg. expected salary",
+                            name=t("c_avg_salary"),
                             mode="lines+markers",
                             marker=dict(size=10, color=UI_THEME["WARNING"]),
                             line=dict(width=3),
@@ -1762,41 +1844,43 @@ with tab4:
                     )
 
                     fig_skills.update_layout(
-                        title="<b>Core skill price analysis</b>",
+                        title=t("c_skill_title"),
                         plot_bgcolor="rgba(0,0,0,0)",
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     )
-                    fig_skills.update_yaxes(title_text="Candidates with this skill", secondary_y=False)
-                    fig_skills.update_yaxes(title_text="Avg. expected salary of this group (TWD)", secondary_y=True)
+                    fig_skills.update_yaxes(title_text=t("c_with_skill_axis"), secondary_y=False)
+                    fig_skills.update_yaxes(title_text=t("c_avg_salary_axis"), secondary_y=True)
                     st.plotly_chart(fig_skills, use_container_width=True)
 
                 # ================= AI report =================
                 st.divider()
-                st.subheader("🤖 AI hiring insights")
-                st.caption(
-                    "The app computes every number from the data above (filters included). The AI only explains them, and it "
-                    "never sees names, emails or resumes. Treat the result as a starting point for discussion, not a decision."
-                )
-                if st.button("✨ Generate insights for this view", key="gen_insights"):
+                st.subheader(t("insights_header"))
+                st.caption(t("insights_caption"))
+                if st.button(t("gen_insights"), key="gen_insights"):
                     insight_summary = insights.build_summary(
                         df_dash, INVITED_STATUSES, STATUS_HIRED, SCORE_THRESHOLD, is_demo=config.DEMO_MODE
                     )
-                    with st.spinner("The AI is reading the numbers..."):
+                    with st.spinner(t("reading_numbers")):
                         st.session_state.analytics_report = {
                             "text": generate_insights_report(insight_summary),
                             "summary": insight_summary,
-                            "scope": f"job: {sel_dash_job} / window: {sel_dash_time}",
+                            "scope": t(
+                                "report_scope",
+                                job=t("all") if sel_dash_job == ALL else sel_dash_job,
+                                window=t(TIME_LABELS[sel_dash_time]),
+                            ),
                         }
                 report = st.session_state.get("analytics_report")
                 if report:
-                    st.caption(f"Report for {report['scope']}")
+                    st.caption(t("report_for", scope=report["scope"]))
                     show_insights_report(report)
-                    with st.expander("📎 Data behind this report (calculated by the app, given to the AI)"):
-                        for table_title, table in insights.summary_tables(report["summary"]):
+                    with st.expander(t("report_data")):
+                        table_label = lambda code: i18n.band_label(i18n.reason_label(code))  # noqa: E731
+                        for table_title, table in insights.summary_tables(report["summary"], LANG, table_label):
                             st.markdown(f"**{table_title}**")
                             st.dataframe(table, hide_index=True, use_container_width=True)
 
             else:
-                st.warning("No applicants match the current filters.")
+                st.warning(t("no_match_filters"))
     else:
-        st.info("👈 Click \"Sync cloud data and load analytics\" at the top left to load the latest recruiting report.")
+        st.info(t("click_sync"))
