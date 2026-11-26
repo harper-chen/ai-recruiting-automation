@@ -42,6 +42,17 @@ def categorize_reason(row):
     return "AI: other mismatch"
 
 
+_CHINESE = r"[\u3400-\u9fff]"
+
+
+def hide_chinese_jobs(df):
+    """English analytics view: leave out candidates of Chinese job titles (the Chinese demo's sample job), so an
+    English-speaking visitor never sees Chinese rows. The Chinese view shows everything, the seed data included."""
+    if df.empty or "job_applied" not in df:
+        return df
+    return df[~df["job_applied"].astype(str).str.contains(_CHINESE, regex=True)]
+
+
 def experience_band(years):
     if pd.isna(years):
         return "Unknown"

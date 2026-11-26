@@ -161,6 +161,15 @@ class ChineseAnalyticsTests(unittest.TestCase):
         self.assertEqual(tables[0][1].iloc[0, 0], "0–2 年")
         self.assertEqual(tables[1][1].iloc[0, 0], "AI：其他不符")
 
+    def test_english_view_hides_chinese_jobs(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {"job_applied": ["Python Backend Engineer", "Python 後端開發工程師", "Data Analyst"], "name": ["A", "林雅婷", "B"]}
+        )
+        self.assertEqual(insights.hide_chinese_jobs(df)["name"].tolist(), ["A", "B"])
+        self.assertTrue(insights.hide_chinese_jobs(pd.DataFrame()).empty)
+
     def test_english_tables_are_unchanged(self):
         summary = {"why_candidates_dropped_out": {"AI: other mismatch": 1}}
         title, table = insights.summary_tables(summary)[0]

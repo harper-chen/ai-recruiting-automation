@@ -1651,6 +1651,9 @@ with tab4:
 
         # Data cleaning
         df_dash = df_dash[df_dash["name"].astype(str).str.strip() != ""]
+        if LANG == "en":
+            # The English view stays all-English: candidates of the Chinese demo job are left out.
+            df_dash = insights.hide_chinese_jobs(df_dash)
 
         if not df_dash.empty:
             df_dash["expected_salary"] = df_dash["expected_salary"].astype(str).str.replace(r"[^\d.]", "", regex=True)
