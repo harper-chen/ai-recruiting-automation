@@ -637,9 +637,9 @@ The {company} Recruiting Team
         "how_scoring_works": (
             "**評分方式**\n\n"
             "- 每位候選人從 **{baseline}** 分起算，依你的規則加分或扣分，最終分數介於 0 到 100。\n"
-            "- **低於 {threshold} 分：**自動寄出婉拒信（應徵 {delay} 小時後寄出）。"
-            "**{threshold} 分以上：**交給用人主管審核。\n"
-            "- **小提醒：**缺少必備條件建議扣 {req_lo}–{req_hi} 分；"
+            "- 低於 {threshold} 分：自動寄出婉拒信（應徵 {delay} 小時後寄出）。"
+            "{threshold} 分以上：交給用人主管審核。\n"
+            "- 小提醒：缺少必備條件建議扣 {req_lo}–{req_hi} 分；"
             "次要落差扣 {minor_lo}–{minor_hi} 分；"
             "加分條件 +{bonus_lo} 到 +{bonus_hi} 分。"
         ),
