@@ -1247,7 +1247,7 @@ with tab2:
                                 "📝 Manager Comment": row[6],
                                 "Resume": clean_resume_url(row[16]),
                                 "AI Rationale": row[15],
-                                "Score arithmetic": row[17],
+                                "Score arithmetic": i18n.calc_label(row[17]),
                             }
                         )
 
@@ -1333,7 +1333,7 @@ with tab2:
                             "↩️ Move back to review": False,
                             "Resume": clean_resume_url(row[16]),
                             "AI Rationale": row[15],
-                            "Score arithmetic": row[17],
+                            "Score arithmetic": i18n.calc_label(row[17]),
                             "Hours left": hours_until_rejection(row[7]),
                         }
                     )

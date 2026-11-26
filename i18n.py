@@ -13,6 +13,8 @@ What does not change: the status values stored in the Google Sheet (they are int
 scoring arithmetic.
 """
 
+import re
+
 import streamlit as st
 
 LANGS = ("en", "zh")
@@ -119,6 +121,21 @@ STATUS_ZH = {
     "Hired": "已錄取",
     "Offer Declined": "婉拒錄取",
 }
+
+
+_CALC_BASELINE = re.compile(r"^(\d+(?:\.\d+)?) baseline")
+_CALC_CAPPED = re.compile(r" \(capped to (\d+)\)")
+
+
+def calc_label(text):
+    """Show the stored score arithmetic ("70 baseline; -10 Rule = 60") in Chinese. The stored text is unchanged,
+    because insights.parse_calculation reads it."""
+    text = str(text or "")
+    if not is_zh():
+        return text
+    text = _CALC_BASELINE.sub(r"基準 \1 分", text)
+    text = _CALC_CAPPED.sub(r"（上限調整為 \1 分）", text)
+    return text.replace("; ", "；")
 
 
 def status_label(code):

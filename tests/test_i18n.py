@@ -80,6 +80,14 @@ class TextTableTests(unittest.TestCase):
         statuses = [value for name, value in vars(config).items() if name.startswith("STATUS_")]
         self.assertEqual(set(statuses) - set(i18n.STATUS_ZH), set())
 
+    def test_score_arithmetic_is_shown_in_chinese(self):
+        stored = "70 baseline; -10 期待薪資高於預算; +5 雲端部署 = 65"
+        with self.use_lang(None):
+            self.assertEqual(i18n.calc_label(stored), stored)
+        with self.use_lang("zh"):
+            self.assertEqual(i18n.calc_label(stored), "基準 70 分；-10 期待薪資高於預算；+5 雲端部署 = 65")
+            self.assertEqual(i18n.calc_label("70 baseline; +40 x = 110 (capped to 100)"), "基準 70 分；+40 x = 110（上限調整為 100 分）")
+
     def test_every_drop_out_reason_has_a_chinese_label(self):
         rows = [
             {"manager_comment": "budget"},
